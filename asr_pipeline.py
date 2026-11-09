@@ -241,3 +241,44 @@ def clear(proj) -> dict:
             f.unlink()
             n += 1
     return {"ok": True, "removed": n}
+
+
+# --------------------------------------------------------------------------
+# 命令行入口（流水线页的「台词译中」步骤直接调这里，日志能被原样捕获）
+# --------------------------------------------------------------------------
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    ap = argparse.ArgumentParser(description="台词分批译中")
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--model", default=None)
+    ap.add_argument("--batch", type=int, default=24)
+    ap.add_argument("--limit", type=int, default=None)
+    ap.add_argument("--reset", action="store_true")
+    a = ap.parse_args(argv)
+
+    shim = type("P", (), {"dir": Path(a.project).expanduser().resolve().parent})()
+    st = state(shim)
+    print(f"[译中] 源 {Path(st['source']).name if st['source'] else '（无）'} · "
+          f"{st['segments']} 段 · 语言 {st['lang_name']}", flush=True)
+    if not st["source_exists"]:
+        print("[译中] 工程里没有 asr_*.json，请先做语音识别", flush=True)
+        return 2
+    try:
+        r = translate(shim, model=a.model, batch=a.batch, limit=a.limit, reset=a.reset)
+    except Exception as e:
+        print(f"[译中] 失败：{e}", flush=True)
+        return 3
+    print(f"[译中] {r['translated']}/{r['total']} 段 · 调用 {r['calls']} 次 · "
+          f"{r['elapsed']}s · {r['tokens']} tokens", flush=True)
+    for e in r.get("errors") or []:
+        print(f"[译中] 第 {e['batch']} 批失败：{e['error']}", flush=True)
+    if r.get("ready"):
+        print("[译中] 完成。下一步：写剧情文案", flush=True)
+        return 0
+    print("[译中] 未全部完成，可直接再跑一次（已完成的批走缓存）", flush=True)
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>台词台 · 原文 / 中文译文对照</title>
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/asr.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">台词台 <span id="projName" class="brand-sub"></span></div>
+  <nav class="appnav">
+    <a href="/flow">流水线</a>
+    <a href="/shots">镜头台</a>
+    <a href="/asr" class="on">台词台</a>
+    <a href="/narration">旁白</a>
+    <a href="/review">逐句校对</a>
+    <a href="/">锚点</a>
+    <a href="/deliver">交付</a>
+  </nav>
+  <div class="actions">
+    <span id="stChip" class="chip"></span>
+    <button id="btnTranslate">分批译中</button>
+    <button id="btnSave" class="primary" disabled>保存修改</button>
+    <button id="btnRefresh">刷新</button>
+  </div>
+</header>
+
+<main class="as-ws">
+  <section class="panel as-main">
+    <div class="panel-head">
+      人物台词 <span id="cntText" class="muted"></span>
+      <span class="grow"></span>
+      <select id="fltSel">
+        <option value="all">全部</option>
+        <option value="untrans">只看未译</option>
+        <option value="edited">只看改过的</option>
+        <option value="long">只看长段（≥8s）</option>
+      </select>
+      <input id="qInput" type="search" placeholder="搜原文 / 译文" spellcheck="false" style="width:180px">
+    </div>
+
+    <div class="as-bar" id="jobBarWrap" hidden>
+      <span id="jobText" class="muted"></span>
+      <div class="prog"><div id="jobBar" class="prog-bar"></div></div>
+      <button id="btnStop" class="sm danger">停止</button>
+    </div>
+
+    <div class="as-scroll" id="asScroll">
+      <table class="tb" id="asTable">
+        <thead>
+          <tr>
+            <th style="width:44px">#</th>
+            <th style="width:112px">源片区间</th>
+            <th>原文</th>
+            <th style="width:44%">中文译文（可改）</th>
+          </tr>
+        </thead>
+        <tbody id="asBody"></tbody>
+      </table>
+      <div id="asEmpty" class="empty" hidden>
+        还没有台词<br><span class="faint">去「流水线」跑「语音识别」，或确认工程里有 <code>asr_*.json</code></span>
+      </div>
+    </div>
+    <div class="as-foot">
+      <span class="muted">只改文本，时间戳不动；原文写回 <code id="srcName">asr_*.json</code>，译文写回工作区缓存，都会先备份</span>
+      <span class="grow"></span>
+      <span id="saveTip" class="muted"></span>
+    </div>
+  </section>
+
+  <aside class="as-right">
+    <section class="panel">
+      <div class="panel-head">当前段 <span id="curIdx" class="chip"></span></div>
+      <div class="panel-body" id="curBox"><div class="muted">点左侧任一行</div></div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">这一段在说什么 <span class="muted">· 画面取自该时刻</span></div>
+      <div class="panel-body">
+        <div id="curShots" class="as-shots"></div>
+        <p class="as-note">台词是「源片秒」。逐句校对台会把它投影到成片轴，对不上的地方在那边改画面。</p>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="panel-head">译中设置</div>
+      <div class="panel-body">
+        <p class="as-note">按 24 段一批送 DeepSeek，每批结果落缓存，断了重跑只补缺失批。</p>
+        <label class="fld"><span>每批段数</span><input id="batchInput" type="number" value="24" min="4" max="60"></label>
+        <label class="check" style="margin-top:6px"><input id="resetChk" type="checkbox"> 清缓存重译（慎用）</label>
+      </div>
+    </section>
+  </aside>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/asr.js"></script>
+</body>
+</html>

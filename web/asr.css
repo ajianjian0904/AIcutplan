@@ -1,0 +1,36 @@
+/* 台词台 */
+.as-ws{flex:1 1 auto; min-height:0; display:grid; grid-template-columns:minmax(600px,1fr) 320px; gap:10px; padding:10px; overflow:hidden}
+.as-main{display:flex; flex-direction:column; min-height:0; overflow:hidden}
+.as-scroll{flex:1 1 auto; overflow:auto; min-height:0}
+.as-foot{display:flex; align-items:center; gap:8px; padding:7px 13px; border-top:1px solid var(--line); background:var(--surface-2); border-radius:0 0 10px 10px}
+.as-foot code{font-family:var(--mono); font-size:10.5px}
+.as-right{display:flex; flex-direction:column; gap:10px; min-height:0; overflow-y:auto}
+.as-bar[hidden]{display:none}
+.as-bar{display:flex; align-items:center; gap:10px; padding:7px 13px; border-bottom:1px solid var(--line); background:#FDF7E8}
+.as-bar .prog{flex:1 1 auto; height:5px; background:var(--line); border-radius:4px; overflow:hidden}
+.as-bar .prog-bar{background:#C99A2E}
+
+table.tb td{padding:4px 8px; vertical-align:top}
+table.tb td.tc{font-family:var(--mono); font-size:10.5px; color:var(--muted); padding-top:8px; white-space:nowrap}
+.orig{font-size:12px; color:var(--muted); line-height:1.5; padding-top:3px}
+.zh{
+  width:100%; border:1px solid transparent; background:transparent; border-radius:5px;
+  padding:3px 5px; font-size:12.5px; line-height:1.55; resize:vertical; min-height:26px;
+  overflow:hidden; white-space:pre-wrap; word-break:break-word;
+  font-family:inherit; color:var(--text);
+}
+.zh:hover{border-color:var(--line)}
+.zh:focus{border-color:var(--teal-600); background:var(--surface); outline:none}
+.zh.dirty{border-color:var(--amber-600); background:#FFFBF2}
+.zh.miss{color:var(--faint)}
+tr.sel td{background:var(--teal-50)}
+tr.sel .zh{border-color:var(--teal-100)}
+
+.as-shots{display:grid; grid-template-columns:repeat(3,1fr); gap:5px}
+.as-shots figure{margin:0}
+.as-shots img{width:100%; height:52px; object-fit:cover; border-radius:4px; border:1px solid var(--line); background:var(--surface-2); display:block}
+.as-shots figcaption{font-size:10px; color:var(--faint); text-align:center; font-family:var(--mono)}
+.as-note{font-size:11px; color:var(--muted); line-height:1.6; margin:8px 0 0}
+.quote{font-size:12.5px; line-height:1.65; margin:0 0 6px}
+.quote.zh{color:var(--text); font-weight:500}
+.quote.orig{color:var(--muted); font-size:11.5px}

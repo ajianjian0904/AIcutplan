@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>交付台 · 成片 / 预览 / 剪映</title>
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/deliver.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">交付台 <span id="projName" class="brand-sub"></span></div>
+  <nav class="appnav">
+    <a href="/flow">流水线</a>
+    <a href="/shots">镜头台</a>
+    <a href="/asr">台词台</a>
+    <a href="/narration">旁白</a>
+    <a href="/review">逐句校对</a>
+    <a href="/">锚点</a>
+    <a href="/deliver" class="on">交付</a>
+  </nav>
+  <div class="actions">
+    <span id="readyChip" class="chip"></span>
+    <button id="btnRefresh">刷新</button>
+  </div>
+</header>
+
+<main class="dl-ws">
+  <section class="panel dl-main">
+    <div class="panel-head">成片 <span id="finalName" class="muted"></span><span class="grow"></span>
+      <button id="btnRebuild" class="ghost sm">重跑命令</button>
+    </div>
+    <div class="dl-player" id="playerBox">
+      <div class="empty" id="noFinal">还没有成片<br><span class="faint">去「流水线」跑「混音 → 合流成片」</span></div>
+    </div>
+    <div class="dl-spec" id="specBox"></div>
+  </section>
+
+  <aside class="dl-right">
+    <section class="panel">
+      <div class="panel-head">产物自检</div>
+      <div class="panel-body" id="filesBox"><div class="muted">载入中…</div></div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">临时预览 <span class="muted">· 不写工程</span></div>
+      <div class="panel-body">
+        <p class="dl-note">按当前会话状态（含<b>未写回</b>的平移与锚点）拼一段看节奏。画质档只影响这个临时文件。</p>
+        <div class="dl-row">
+          <label class="check"><input type="radio" name="scope" value="beat" checked> 整块</label>
+          <label class="check"><input type="radio" name="scope" value="sentence"> 当前选中句</label>
+        </div>
+        <div class="dl-row" style="margin-top:6px">
+          <select id="qualitySel">
+            <option value="high">原画 1280×720</option>
+            <option value="mid">高清 960×540</option>
+            <option value="low">流畅 640×360</option>
+          </select>
+          <label class="check"><input id="subsChk" type="checkbox" checked> 字幕</label>
+          <label class="check"><input id="audioChk" type="checkbox" checked> 混音</label>
+          <label class="check"><input id="forceChk" type="checkbox"> 强制重渲</label>
+        </div>
+        <button id="btnRender" class="primary" style="margin-top:8px">渲染预览</button>
+        <div id="pvStatus" class="muted" style="margin-top:6px">尚未渲染</div>
+        <div id="pvBox"></div>
+        <div id="pvList" class="dl-list"></div>
+      </div>
+    </section>
+  </aside>
+
+  <section class="panel dl-export">
+    <div class="panel-head">导出剪映草稿 <span class="muted">· 单向链路</span>
+      <span class="grow"></span>
+      <span id="envChip" class="chip"></span>
+    </div>
+    <div class="panel-body">
+      <p class="dl-note">明文草稿 → 剪映打开精修 → 人工点导出。<b>剪映保存后草稿变密文，脚本读不回来</b>；重复导出会覆盖剪映里的人工修改。</p>
+      <div class="ex-grid">
+        <label class="fld"><span>草稿名</span><input id="exName" type="text" spellcheck="false"></label>
+        <div class="fld"><span>导出模式</span>
+          <label class="check"><input type="radio" name="exmode" value="segments" checked> 逐刀 · <span id="cutCount">—</span> 个独立片段，可在剪映里逐刀调</label>
+          <label class="check"><input type="radio" name="exmode" value="whole"> 整片 · 1 个画面片段 + 混音轨 + 字幕轨</label>
+        </div>
+      </div>
+      <div class="dl-row" style="margin-top:9px">
+        <button id="exBuild" class="primary">生成草稿到工作区</button>
+        <button id="exInstall" disabled title="生成并自检通过后可用">写入剪映草稿目录</button>
+        <label class="check"><input id="exReplace" type="checkbox"> 允许覆盖同名草稿</label>
+        <span id="exPath" class="muted"></span>
+      </div>
+      <div id="exHealth" class="dl-list"></div>
+      <div id="exHistory" class="dl-list"></div>
+    </div>
+  </section>
+</main>
+
+<div id="cmdModal" class="modal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>重跑命令</span><button id="cmdClose" class="ghost">关闭</button></div>
+    <p class="cmd-note">写回 cutplan 之后的完整链路。在「流水线」页可直接按顺序点运行，不必手贴命令。</p>
+    <pre id="cmdBody" class="logbox light"></pre>
+    <div class="modal-foot"><button id="cmdCopy">复制全部</button></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/deliver.js"></script>
+</body>
+</html>

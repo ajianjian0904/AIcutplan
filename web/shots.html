@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>镜头台 · 镜头表审阅</title>
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/shots.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">镜头台 <span id="projName" class="brand-sub"></span></div>
+  <nav class="appnav">
+    <a href="/flow">流水线</a>
+    <a href="/shots" class="on">镜头台</a>
+    <a href="/asr">台词台</a>
+    <a href="/narration">旁白</a>
+    <a href="/review">逐句校对</a>
+    <a href="/">锚点</a>
+    <a href="/deliver">交付</a>
+  </nav>
+  <div class="actions">
+    <span id="srcChip" class="chip"></span>
+    <button id="btnRefresh">刷新</button>
+  </div>
+</header>
+
+<main class="sh-ws">
+  <section class="panel sh-main">
+    <div class="panel-head">
+      镜头表 <span id="statText" class="muted"></span>
+      <span class="grow"></span>
+      <label class="check"><input id="thumbChk" type="checkbox" checked> 缩略图</label>
+      <select id="fltSel">
+        <option value="all">全部镜头</option>
+        <option value="long">只看长镜（≥4s）</option>
+        <option value="short">只看碎镜（≤0.3s）</option>
+        <option value="ost">只看有原声</option>
+        <option value="noost">只看无原声</option>
+      </select>
+      <input id="qInput" type="search" placeholder="跳到第 N 镜" spellcheck="false" style="width:96px">
+    </div>
+    <div class="sh-scroll" id="shScroll">
+      <table class="tb" id="shTable">
+        <thead>
+          <tr>
+            <th style="width:52px">镜号</th>
+            <th style="width:104px">源片区间</th>
+            <th style="width:60px">时长</th>
+            <th style="width:120px">时长条</th>
+            <th style="width:56px">原声</th>
+            <th style="width:104px">画面</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="shBody"></tbody>
+      </table>
+      <div id="shEmpty" class="empty" hidden>
+        还没有 shotlist.csv<br><span class="faint">去「流水线」跑「镜头切分」</span>
+      </div>
+    </div>
+    <div class="sh-foot">
+      <span class="muted">合/删/切只改镜头表，不动 cutplan；切点最多挪到相邻镜边界内</span>
+      <span class="grow"></span>
+      <span id="actTip" class="muted"></span>
+    </div>
+  </section>
+
+  <aside class="sh-right">
+    <section class="panel">
+      <div class="panel-head">当前镜头 <span id="curIdx" class="chip"></span></div>
+      <div class="panel-body" id="curBox">
+        <div class="muted">点左侧任一行为当前镜头</div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">有效段 <span class="muted">· 给提纲/骨架用</span></div>
+      <div class="panel-body">
+        <p class="sh-note">正片区间，逗号分隔，例如 <code>0-275,601-1655</code>。广告、重复上集、下集预告都不算。保存后写进 <code>project.json</code> 的 <code>recap.valid</code>。</p>
+        <input id="validInput" type="text" spellcheck="false" placeholder="0-1420">
+        <div class="row" style="margin-top:8px">
+          <button id="btnValid" class="primary sm">保存有效段</button>
+          <button id="btnQuickValid" class="sm" title="用当前筛选出的镜头范围填">用可见范围</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">分布</div>
+      <div class="panel-body" id="histBox"></div>
+    </section>
+  </aside>
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/shots.js"></script>
+</body>
+</html>

@@ -31,6 +31,7 @@ import asr_pipeline as AP
 import sentence_studio as SS
 import preview_render as PR
 import review as RV
+import pipeline as PL
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -524,6 +525,52 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/review.js":
                 return self._file(WEB / "review.js", "application/javascript; charset=utf-8")
 
+            if p == "/base.css":
+                return self._file(WEB / "base.css", "text/css; charset=utf-8")
+            if p in ("/flow", "/flow.html"):
+                return self._file(WEB / "flow.html", "text/html; charset=utf-8")
+            if p == "/flow.css":
+                return self._file(WEB / "flow.css", "text/css; charset=utf-8")
+            if p == "/flow.js":
+                return self._file(WEB / "flow.js", "application/javascript; charset=utf-8")
+            if p in ("/shots", "/shots.html"):
+                return self._file(WEB / "shots.html", "text/html; charset=utf-8")
+            if p == "/shots.css":
+                return self._file(WEB / "shots.css", "text/css; charset=utf-8")
+            if p == "/shots.js":
+                return self._file(WEB / "shots.js", "application/javascript; charset=utf-8")
+            if p in ("/asr", "/asr.html"):
+                return self._file(WEB / "asr.html", "text/html; charset=utf-8")
+            if p == "/asr.css":
+                return self._file(WEB / "asr.css", "text/css; charset=utf-8")
+            if p == "/asr.js":
+                return self._file(WEB / "asr.js", "application/javascript; charset=utf-8")
+            if p in ("/deliver", "/deliver.html"):
+                return self._file(WEB / "deliver.html", "text/html; charset=utf-8")
+            if p == "/deliver.css":
+                return self._file(WEB / "deliver.css", "text/css; charset=utf-8")
+            if p == "/deliver.js":
+                return self._file(WEB / "deliver.js", "application/javascript; charset=utf-8")
+
+            if p == "/api/flow/state":
+                return self.json(self.api_flow_state())
+            if p == "/api/flow/job":
+                job = PL.RUNNER.snapshot(int(q.get("after", 0) or 0))
+                return self.json({"ok": True, "job": job, "busy": PL.RUNNER.busy()})
+            if p == "/api/flow/history":
+                return self.json({"ok": True, "items": PL.job_history(16)})
+            if p == "/api/flow/log":
+                return self.json({"ok": True, "text": PL.job_log_text(q.get("name", ""),
+                                                                    int(q.get("tail", 200)))})
+            if p == "/api/shots/table":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                return self.json({"ok": True, "data": PL.shots_table(ST.proj.dir)})
+            if p == "/api/asr/segments":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                return self.json({"ok": True, "data": PL.asr_merged(ST.proj.dir)})
+
             if p == "/api/health":
                 return self.json({"ok": True, "project": ST.project_dir,
                                   "loaded": ST.proj is not None})
@@ -565,6 +612,13 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/preview/file":
                 f = PR.file_for(q.get("k", ""))
                 return self._send(200, f.read_bytes(), "video/mp4", cache=True)
+            if p == "/api/final/file":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                f = Path(PR.final_info(ST.proj).get("file") or "")
+                if not f.is_file():
+                    return self.err("还没有成片，先跑合流", 404)
+                return self._media(f)
             if p == "/api/preview/poster":
                 f = PR.poster_for(q.get("k", ""))
                 return self._send(200, f.read_bytes(), "image/jpeg", cache=True)
@@ -614,8 +668,23 @@ class Handler(BaseHTTPRequestHandler):
                 ST.persist()
                 FRAME_CACHE.mkdir(parents=True, exist_ok=True)
                 return self.json(ST.snapshot())
+            if p == "/api/flow/new":
+                return self.json({"ok": True, "data": PL.new_project(d)})
+            if p == "/api/flow/run":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                return self.json({"ok": True, "job": PL.RUNNER.start(
+                    ST.proj.dir, str(d.get("step", "")), d.get("params") or {})})
+            if p == "/api/flow/stop":
+                return self.json({"ok": True, "job": PL.RUNNER.stop()})
             if not ST.proj:
                 return self.err("工程未载入")
+            if p == "/api/shots/act":
+                return self.json({"ok": True, "data": PL.edit_shots(
+                    ST.proj.dir, str(d.get("action", "")), d)})
+            if p == "/api/asr/save":
+                return self.json({"ok": True, "data": PL.save_asr_rows(
+                    ST.proj.dir, d.get("changes") or [])})
             if p.startswith("/api/narr/"):
                 return self.json(self.narr_post(p, d))
             if p == "/api/asr/translate":
@@ -735,6 +804,78 @@ class Handler(BaseHTTPRequestHandler):
         if not path.exists():
             return self.err(f"缺少 {path.name}", 404)
         self._send(200, path.read_bytes(), ctype)
+
+    def _media(self, path: Path):
+        """带 Range 的视频输出，<video> 才能拖动进度。"""
+        total = path.stat().st_size
+        rng = self.headers.get("Range", "")
+        ctype = "video/mp4"
+        if not rng.startswith("bytes="):
+            self.send_response(200)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(total))
+            self.send_header("Accept-Ranges", "bytes")
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            with path.open("rb") as fh:
+                shutil.copyfileobj(fh, self.wfile)
+            return
+        try:
+            a, _, b = rng[6:].partition("-")
+            start = int(a) if a else 0
+            end = int(b) if b else total - 1
+        except ValueError:
+            return self.err("Range 不合法", 416)
+        start = max(0, start)
+        end = min(total - 1, end)
+        if start > end:
+            return self.err("Range 不合法", 416)
+        n = end - start + 1
+        self.send_response(206)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Range", f"bytes {start}-{end}/{total}")
+        self.send_header("Content-Length", str(n))
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        with path.open("rb") as fh:
+            fh.seek(start)
+            left = n
+            while left > 0:
+                chunk = fh.read(min(262144, left))
+                if not chunk:
+                    break
+                try:
+                    self.wfile.write(chunk)
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+                left -= len(chunk)
+
+    # ------------------------------------------------------------ 制作流水线
+    def api_flow_state(self):
+        doc = PL.doctor()
+        job = PL.RUNNER.snapshot(0)
+        if not ST.proj:
+            return {"ok": True, "project": None, "steps": [], "doctor": doc,
+                    "job": job, "history": PL.job_history(8), "gate": {}}
+        d = ST.proj.dir
+        cfg = PL.proj_cfg(d)
+        steps = PL.scan(d)
+        done = [s for s in steps if s["state"] == "ok"]
+        cur = next((s for s in steps if s["state"] != "ok"), None)
+        return {
+            "ok": True,
+            "project": {"dir": str(d), "name": cfg.get("name") or d.name,
+                        "fps": cfg.get("fps"),
+                        "source": (cfg.get("source_video") or ""),
+                        "target": PL.recap_cfg(d).get("target_dur") or 0},
+            "doctor": doc, "steps": steps, "job": job,
+            "history": PL.job_history(8),
+            "gate": {"narr_locked": NR.has_unfinalized_draft(str(d))},
+            "summary": {"total": len(steps), "done": len(done),
+                        "current": cur["id"] if cur else None},
+            "rebuild": rebuild_commands(),
+        }
 
     # ------------------------------------------------------------ 旁白工作台
     def narr_state(self):
