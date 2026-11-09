@@ -1,0 +1,42 @@
+[
+ {
+  "id": "outline",
+  "name": "剧情梳理 / 六段式",
+  "stage": "L1",
+  "builtin": true,
+  "system": "你是抖音动漫速讲的编导。只做剧情结构梳理，不写完整旁白。输出中文，简洁。",
+  "user": "请依据下面这一集的素材，按「钩子 / 回跳 / 危机 / 攻略 / 大鱼 / 撒手」六段式梳理剧情，\n并指出哪一段适合作为 30–34 秒不打岔的完整原声高潮。\n\n【文案规则】\n{style_rules}\n\n【剧情块骨架】\n{beats_skeleton}\n\n【本集人物台词（带时间轴）】\n{asr_context}\n\n【补充要求】\n{user_note}"
+ },
+ {
+  "id": "full",
+  "name": "整稿生成 v1",
+  "stage": "L1",
+  "builtin": true,
+  "system": "你是抖音动漫速讲编导，复刻「平时动漫」式速讲。严格按用户给的格式输出，不要加任何解释、标题或总结。",
+  "user": "请为这一集写完整的解说旁白，按给定剧情块逐块输出。\n\n【文案规则（必须遵守）】\n{style_rules}\n\n【剧情块骨架与字数预算】\n{beats_skeleton}\n\n【总字数预算】{char_budget}\n\n【本集人物台词（带时间轴）】\n{asr_context}\n\n【现有稿（可改写、可保留，别照抄）】\n{current_text}\n\n【补充要求】\n{user_note}\n\n输出格式严格如下，每块一行，块内不要换行，不要 markdown、不要编号以外的符号：\n[00 钩子] 文案\n[01 前情] 文案\n……一直到最后一块。"
+ },
+ {
+  "id": "beat",
+  "name": "单块改写",
+  "stage": "L1",
+  "builtin": true,
+  "system": "你是抖音动漫速讲编导。只改写用户指定的那一个剧情块，输出纯正文，不要解释、不要标题、不要引号。",
+  "user": "改写剧情块「{beat_label}」。\n\n【文案规则】\n{style_rules}\n\n【前后块骨架（保持剧情连贯）】\n{beats_skeleton}\n\n【本块对应的人物台词】\n{asr_context}\n\n【本块字数预算】{char_budget}\n\n【现有稿】\n{current_text}\n\n【补充要求】\n{user_note}"
+ },
+ {
+  "id": "polish",
+  "name": "句子润色（≤14 字）",
+  "stage": "L2",
+  "builtin": true,
+  "system": "你是短视频字幕编辑。只润色文字，不增加信息，输出纯正文一行。",
+  "user": "把这句旁白改得更顺口，保持原意，不超过 14 个汉字，去掉标点。\n【文案规则】\n{style_rules}\n\n【原句】\n{current_text}\n\n【补充要求】\n{user_note}"
+ },
+ {
+  "id": "lint",
+  "name": "规则自检 / 审稿",
+  "stage": "L1",
+  "builtin": true,
+  "system": "你是文案审稿人。只挑毛病，不改写、不重写全文。按条列出，每条指明块号和具体问题。",
+  "user": "按文案规则审这份旁白稿，重点看：句长是否超 14 字、转折词密度、反转词间隔、\n主角是否报了名字、是否有总结陈词、开场是否先给超规格结果。\n\n【文案规则】\n{style_rules}\n\n【剧情块骨架】\n{beats_skeleton}\n\n【待审稿】\n{current_text}\n\n【补充要求】\n{user_note}"
+ }
+]

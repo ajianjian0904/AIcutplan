@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>锚点校对台</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">锚点校对台 <span id="projName" class="brand-sub"></span></div>
+  <div id="projMeta" class="meta"></div>
+  <div class="actions">
+    <a class="navlink" href="/review">逐句校对台</a>
+    <a class="navlink" href="/narration">旁白工作台</a>
+    <input id="dirInput" type="text" spellcheck="false" title="工程目录绝对路径">
+    <button id="btnLoad">载入工程</button>
+    <button id="btnUndo" title="撤销上一步平移">撤销</button>
+    <button id="btnRedo" title="重做">重做</button>
+    <button id="btnRebuild" title="查看重跑命令（界面不代为执行）">重跑命令</button>
+    <button id="btnExport" title="可选：导出为剪映草稿供精修">导出剪映</button>
+    <button id="btnPreview" title="按当前改动临时渲染这一块 / 这一句看效果">渲染预览</button>
+    <button id="btnSave" class="primary">写回</button>
+  </div>
+</header>
+
+<main class="workspace">
+  <aside class="panel beats">
+    <div class="panel-head">剧情块 <span id="beatCount" class="muted"></span></div>
+    <div id="beatList" class="beat-list"></div>
+    <div class="panel-foot">↑ ↓ 切换 · 空格确认本块</div>
+  </aside>
+
+  <section class="panel source">
+    <div class="panel-head">源片时间轴 <span id="srcDur" class="muted"></span></div>
+    <div class="timeline">
+      <div class="tl-track" id="tlTrack">
+        <div class="tl-block" id="tlBlock" title="拖动整块平移源片取段"></div>
+      </div>
+      <div class="tl-ticks" id="tlTicks"></div>
+      <div class="sent-marks" id="sentMarks" title="选中旁白句覆盖的刀（源片位置）"></div>
+      <div class="tl-zoom" id="tlZoom" title="局部放大轨：±40s，用于精细拖动起点">
+        <div class="tl-zoom-mid"></div>
+        <div class="tl-zoom-block" id="tlZoomBlock"></div>
+      </div>
+      <div class="tl-label" id="tlLabel"></div>
+      <div class="tl-hint">上条 = 全局定位　·　下条 = 起点 ±40s 精细拖动　·　松手后吸附镜头边界</div>
+      <div class="dlg-head">人物台词 <span class="muted">· 源片时间，中文译文　点击台词把镜头拼板定位到该处</span></div>
+      <div class="dlg-track" id="dlgTrack"></div>
+    </div>
+    <div class="panel-sub">镜头拼板 <span class="muted">· 点格子 = 首镜跳到该镜头　· 悬停看此刻台词</span></div>
+    <div class="sheet" id="sheet"></div>
+    <div class="shot-line" id="shotLine">把鼠标移到格子上，看这个镜头里人物在说什么</div>
+    <div class="sheet-hint" id="sheetHint"></div>
+  </section>
+
+  <aside class="panel detail">
+    <div class="panel-head" id="detailHead">当前块</div>
+    <div id="metrics" class="metrics"></div>
+    <div class="divider"></div>
+    <div class="panel-sub">旁白 <span class="muted">· 点句联动画面，可编辑本句首/尾镜</span></div>
+    <div id="sentList" class="sent-list"></div>
+    <div id="sentDetail" class="sent-detail" hidden></div>
+    <div class="controls">
+      <button data-shift="-0.5">−0.5s</button>
+      <button data-shift="0.5">+0.5s</button>
+      <button data-shift="-0.1">−0.1s</button>
+      <button data-shift="0.1">+0.1s</button>
+      <button id="btnReset">复位</button>
+    </div>
+    <label class="check"><input type="checkbox" id="snapChk" checked> 吸附镜头边界（从镜头开头 +0.10s 起播）</label>
+    <div class="controls">
+      <button id="btnAB">A/B 对照</button>
+      <button id="btnConfirm" class="primary">确认本块</button>
+    </div>
+    <div class="notice" id="notice"></div>
+  </aside>
+</main>
+
+<footer class="filmstrip">
+  <div class="panel-head">成片时间轴 <span id="outMeta" class="muted"></span></div>
+  <div class="strip" id="strip"></div>
+  <div class="strip-hint">绿 = 已确认　深绿 = 当前块　灰 = 待校对　·　字幕行与切点同源，不可单独拖动</div>
+</footer>
+
+<div class="modal" id="abModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head">
+      <span>A/B 对照 · 肉眼判「有没有跳场」</span>
+      <button id="abClose">关闭</button>
+    </div>
+    <div id="abBody"></div>
+    <div class="modal-foot">
+      <button id="abClip">导出 3 秒 A/B 片段并播放（按需，较慢）</button>
+      <span class="muted">片段是唯一能判断动作是否完整的方式</span>
+    </div>
+    <div id="abClips"></div>
+  </div>
+</div>
+
+<div class="modal" id="cmdModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>重跑命令</span><button id="cmdClose">关闭</button></div>
+    <p class="cmd-note">界面不代为执行渲染／混音。确认写回后，在工程目录按顺序自行执行以下命令。</p>
+    <pre id="cmdBody"></pre>
+    <div class="modal-foot"><button id="cmdCopy">复制全部</button></div>
+  </div>
+</div>
+
+<div class="modal" id="exportModal" hidden>
+  <div class="modal-card ex-card">
+    <div class="modal-head"><span>导出为剪映草稿</span><button id="exClose">关闭</button></div>
+    <p class="cmd-note">成片之后的可选交付：明文草稿 → 剪映打开编辑 → 人工点导出。<b>单向链路</b>：剪映保存后草稿会变成密文，脚本读不回来；重复导出会覆盖剪映里的人工修改。剪映 7+ 不支持自动导出，最后一步必须人工点。</p>
+    <div class="ex-grid">
+      <label class="ex-field">草稿名<input id="exName" type="text" spellcheck="false"></label>
+      <div class="ex-field">导出模式
+        <label class="ex-radio"><input type="radio" name="exMode" value="segments" checked> 逐刀 · <span id="exCutCount">—</span> 个独立片段，可在剪映里逐刀调整</label>
+        <label class="ex-radio"><input type="radio" name="exMode" value="whole"> 整片 · 1 个画面片段 + 混音轨 + 字幕轨</label>
+      </div>
+    </div>
+    <div class="ex-sec"><div class="ex-h">成片产物</div><div id="exFiles" class="ex-list"></div></div>
+    <div class="ex-sec"><div class="ex-h">剪映环境</div><div id="exEnv" class="ex-list"></div></div>
+    <div class="ex-sec"><div class="ex-h">生成与自检</div><div id="exHealth" class="ex-list muted">尚未生成</div></div>
+    <div class="modal-foot">
+      <button id="exBuild" class="primary">生成草稿到工作区</button>
+      <button id="exInstall" disabled title="生成并自检通过后可用">写入剪映草稿目录</button>
+      <span id="exPath" class="muted"></span>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="sentModal" hidden>
+  <div class="modal-card sent-card">
+    <div class="modal-head"><span>编辑本句画面 · 句级锚点</span><button id="sentClose">关闭</button></div>
+    <div class="sent-scroll">
+    <div class="sent-quote" id="sentQuote"></div>
+    <div class="sent-meta" id="sentMeta"></div>
+    <div class="sent-warn" id="sentWarn" hidden></div>
+    <div class="panel-sub">这句覆盖的刀 <span class="muted">· 显示此刻人物在说什么</span></div>
+    <div class="cut-cards" id="cutCards"></div>
+    <div class="divider"></div>
+    <div class="anchor-row">
+      <label>首镜 <input id="ancFirst" type="number" min="0"></label>
+      <label>尾镜 <input id="ancLast" type="number" min="0"></label>
+      <button id="ancPreset" title="尾镜 = 首镜 + 刀数 − 1，连续取镜">连续取镜</button>
+      <button id="ancPrev">◀ 前 16 镜</button>
+      <button id="ancNext">后 16 镜 ▶</button>
+      <span class="muted" id="ancHint"></span>
+    </div>
+    <div class="panel-sub">镜头拼板 <span class="muted">· 点格子设为首镜，尾镜自动 = 首镜 + 刀数 − 1</span></div>
+    <div class="sheet mini" id="sentSheet"></div>
+    </div>
+    <div class="modal-foot">
+      <button id="ancApply" class="primary">应用到本句</button>
+      <button id="ancClear">清除本句锚点</button>
+      <button id="ancAB">A/B 对照</button>
+      <span class="muted">只改本句这几刀的源区间，不挪任何其他刀位</span>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="previewModal" hidden>
+  <div class="modal-card pv-card">
+    <div class="modal-head"><span>临时渲染预览</span><button id="pvClose">关闭</button></div>
+    <p class="cmd-note">按当前会话状态（含<b>未写回</b>的块级平移与句级锚点）拼出片段。不写工程文件、不触发 7 步链路。画面按刀取自源片，声音是最终混音的对应区间，字幕为成片 SRT 的对应条目。</p>
+    <div class="pv-opts">
+      <label><input type="radio" name="pvScope" value="beat" checked> 整块</label>
+      <label><input type="radio" name="pvScope" value="sentence"> 当前选中句</label>
+      <label><input type="checkbox" id="pvSubs" checked> 烧字幕</label>
+      <label><input type="checkbox" id="pvAudio" checked> 混音音轨</label>
+      <label><input type="checkbox" id="pvForce"> 强制重渲染</label>
+      <button id="pvRender" class="primary">开始渲染</button>
+    </div>
+    <div class="pv-opts pv-quality">
+      <span class="pv-lbl">预览画质</span>
+      <label><input type="radio" name="pvQuality" value="high" checked> 原画 1280×720（推荐）</label>
+      <label><input type="radio" name="pvQuality" value="mid"> 高清 960×540</label>
+      <label><input type="radio" name="pvQuality" value="low"> 流畅 640×360</label>
+    </div>
+    <div class="pv-note">
+      <b>画质说明</b>：上面的档位<b>只影响这个临时预览文件</b>，用来判断节奏和画面对不对，不会写进工程。
+      最终成片 <code id="pvFinalName">out/03-rapid-narration.mp4</code><span id="pvFinalSpec"></span>
+      由 <code>r7_mux.py -c:v copy</code> 直接复制画面流、<b>不重编码</b>；剪映逐刀草稿引用的也是源片原画。
+      <b>画质上限由片源决定</b>（本片 1280×720），不会变成 1080p。
+    </div>
+    <div id="pvStatus" class="pv-status muted">尚未渲染</div>
+    <div id="pvVideo" class="pv-video"></div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/app.js"></script>
+</body>
+</html>

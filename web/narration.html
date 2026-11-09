@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>旁白工作台 · 锚点校对台</title>
+<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="/narration.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">旁白工作台 <span id="projName" class="brand-sub"></span></div>
+  <div class="stage-pills">
+    <span class="pill on">① 剧情定稿</span>
+    <span class="pill">② 句子审核 · 二期</span>
+  </div>
+  <div class="actions">
+    <select id="modelSel" title="DeepSeek 模型（列表从 /models 动态拉取）"></select>
+    <button id="btnConfig">模型配置</button>
+    <a class="navlink" href="/review">逐句校对台</a>
+    <a class="navlink" href="/">锚点校对台 →</a>
+    <button id="btnFinalize" class="primary">定稿</button>
+  </div>
+</header>
+
+<main class="narr-workspace">
+  <aside class="panel beats">
+    <div class="panel-head">剧情块 <span id="beatCount" class="muted"></span></div>
+    <div class="scope-row">
+      <button id="btnAll" class="scope active">整集</button>
+      <span class="muted">点块 = 只作用于该块</span>
+    </div>
+    <div id="beatList" class="beat-list"></div>
+    <div class="panel-foot">共 14 块 · 草稿只存工作区，不改工程文件</div>
+  </aside>
+
+  <section class="panel main">
+    <div class="panel-head">与 AI 一起定整体剧情旁白</div>
+
+    <div class="row">
+      <select id="tplSel" class="grow"></select>
+      <button id="btnEditTpl">编辑模板</button>
+      <button id="btnSaveAs">另存为</button>
+      <button id="btnNewTpl">新建</button>
+    </div>
+
+    <div class="row vars">
+      <span class="lbl">注入变量</span>
+      <label><input type="checkbox" data-v="style_rules" checked> 文案规则</label>
+      <label><input type="checkbox" data-v="beats_skeleton" checked> 块骨架</label>
+      <label><input type="checkbox" data-v="asr_context" checked> 人物台词</label>
+      <label><input type="checkbox" data-v="char_budget" checked> 字数预算</label>
+      <label><input type="checkbox" data-v="current_text" checked> 当前稿</label>
+      <label><input type="checkbox" data-v="beat_label" checked> 块名</label>
+      <label><input type="checkbox" data-v="user_note" checked> 补充要求</label>
+    </div>
+
+    <textarea id="userNote" class="note-input" rows="2" placeholder="补充要求，例如：钩子再狠一点、结尾别总结、保留「蛋黄酱」这个梗…"></textarea>
+
+    <div class="prompt-head">
+      <span>提示词预览 <span id="promptMeta" class="muted"></span></span>
+      <button id="btnRender">重新渲染</button>
+      <button id="btnCopy">复制全文</button>
+    </div>
+    <pre id="promptView" class="prompt-view"></pre>
+
+    <div class="row">
+      <button id="btnLLM" class="primary">DeepSeek 生成</button>
+      <button id="btnPaste">从剪贴板粘贴回复</button>
+      <span id="llmStatus" class="muted"></span>
+    </div>
+
+    <div class="reply-head">AI 回复 <span class="muted">· 原始输出留档，可直接编辑</span></div>
+    <textarea id="replyBox" class="reply-box" rows="7" placeholder="点「DeepSeek 生成」，或把别处的 AI 回复粘贴到这里"></textarea>
+
+    <div class="row">
+      <button id="btnParse">解析为块</button>
+      <button id="btnApply" class="primary">应用到草稿</button>
+      <button id="btnSnapshot">存快照</button>
+    </div>
+    <div id="parseResult" class="parse-result"></div>
+  </section>
+
+  <aside class="panel side">
+    <div class="panel-head" id="editorHead">当前块编辑</div>
+    <textarea id="beatEditor" class="beat-editor" rows="5" placeholder="点左侧某一块后，可在这里直接改文案"></textarea>
+    <button id="btnSaveBeat" class="wide">保存本块到草稿</button>
+
+    <div class="divider"></div>
+    <div class="panel-sub">提示词模板</div>
+    <div id="tplList" class="tpl-list"></div>
+
+    <div class="divider"></div>
+    <div class="panel-sub">规则校验 <span class="muted">· 只读</span></div>
+    <div id="checkBox" class="check-box"></div>
+
+    <div class="divider"></div>
+    <div class="panel-sub">素材 · 台词</div>
+    <div id="asrBox" class="calib-box"></div>
+    <button id="btnAsrTranslate" class="wide">译为中文（DeepSeek 分批）</button>
+    <button id="btnAsrClear" class="wide">清除译文</button>
+
+    <div class="divider"></div>
+    <div class="panel-sub">TTS 标定</div>
+    <div id="calibBox" class="calib-box"></div>
+    <button id="btnRecalib" class="wide">用 tts-result.json 重新标定</button>
+
+    <div class="divider"></div>
+    <div class="panel-sub">阶段门禁</div>
+    <div id="gateBox" class="gate-box"></div>
+
+    <div class="divider"></div>
+    <div class="panel-sub">定稿后动作 <span class="muted">· 手工</span></div>
+    <div id="applyBox" class="gate-box"></div>
+    <button id="btnApplyScript" class="wide">写回 script.json</button>
+    <button id="btnCommands" class="wide">查看 7 步重跑脚本</button>
+
+    <div class="divider"></div>
+    <div class="panel-sub">快照 <span class="muted">· 可回滚</span></div>
+    <div id="snapList" class="snap-list"></div>
+  </aside>
+</main>
+
+<footer class="narr-foot">
+  <span id="footStatus"></span>
+  <span class="muted">改文案 → 字数变 → TTS 时长变 → 刀数变 → cutplan 全量重算。定稿后请重跑 7 步链路，再去做锚点校对。</span>
+  <button id="btnDiscard" class="danger">放弃草稿</button>
+</footer>
+
+<div class="modal" id="tplModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>编辑提示词模板</span><button id="tplClose">关闭</button></div>
+    <label class="fld">名称<input id="tplName" type="text"></label>
+    <label class="fld">阶段<select id="tplStage"><option value="L1">L1 剧情级</option><option value="L2">L2 句子级</option></select></label>
+    <label class="fld">System<textarea id="tplSystem" rows="3"></textarea></label>
+    <label class="fld">User（可用变量：<code id="varHint"></code>）<textarea id="tplUser" rows="12"></textarea></label>
+    <div class="modal-foot">
+      <button id="tplSave" class="primary">保存模板</button>
+      <span class="muted">内置模板修改会自动另存为副本，不覆盖原模板</span>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="cfgModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>模型配置</span><button id="cfgClose">关闭</button></div>
+    <p class="cmd-note">API Key 只从环境变量 <code>DEEPSEEK_API_KEY</code> 读取，不写入任何文件。这里只配 base_url / 模型 / temperature。</p>
+    <label class="fld">Base URL<input id="cfgBase" type="text"></label>
+    <label class="fld">模型<select id="cfgModel"></select></label>
+    <label class="fld">Temperature<input id="cfgTemp" type="number" step="0.1" min="0" max="2"></label>
+    <div class="modal-foot"><button id="cfgSave" class="primary">保存配置</button><span id="cfgKey" class="muted"></span></div>
+  </div>
+</div>
+
+<div class="modal" id="finalModal" hidden>
+  <div class="modal-card narrow">
+    <div class="modal-head"><span>确认定稿</span><button id="finalClose">取消</button></div>
+    <p class="cmd-note">定稿会先自动存一份快照，然后解锁锚点校对台的写回。</p>
+    <p class="cmd-note">定稿之后<b>不自动重跑</b>。请按顺序在工程目录执行：切句 → 配音 → n3_align → cut.py --force → relayout_narr → r6_mix → r7_mux。重跑会重新生成 cutplan.json，锚点平移需在重跑之后再做。</p>
+    <div class="modal-foot"><button id="finalOk" class="primary">确认定稿</button></div>
+  </div>
+</div>
+
+<div class="modal" id="cmdModal" hidden>
+  <div class="modal-card">
+    <div class="modal-head"><span>定稿后 · 7 步重跑脚本</span><button id="cmdClose">关闭</button></div>
+    <p class="cmd-note">界面不代为执行。写回 script.json 后，在工程目录按顺序执行。②→③→④ 不能颠倒（必须先配音拿到实测时长，画面才按 1.32s 均分）。重跑会重建 cutplan.json，锚点平移需重做。</p>
+    <pre id="cmdBody"></pre>
+    <div class="modal-foot">
+      <button id="cmdCopy">复制全部</button>
+      <button id="cmdSave" class="primary">下载 .bat</button>
+      <span class="muted">脚本只生成命令，绝不自动运行渲染与配音</span>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/narration.js"></script>
+</body>
+</html>

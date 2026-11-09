@@ -1,0 +1,22 @@
+# 运行时产物（可由工程与接口重新生成）
+cache/
+exports/
+drafts/
+asr/
+__pycache__/
+*.pyc
+
+# 会话状态：含本机工程绝对路径与未写回改动，不入库
+studio_state.json
+
+# 工作区记忆/会话数据（含本机路径与内部记录）
+.workbuddy/
+
+# 可能包含密钥的本地配置
+llm_config.json
+.env
+
+# 日志与系统文件
+*.log
+.DS_Store
+Thumbs.db

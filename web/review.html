@@ -1,0 +1,101 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逐句校对台 · 旁白 / 画面 / 人物台词</title>
+<link rel="stylesheet" href="/review.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">逐句校对台 <span id="projName" class="brand-sub"></span></div>
+  <div class="progress-box" title="句级确认与块级确认互相独立">
+    <span id="progText" class="prog-text">载入中…</span>
+    <div class="prog-track"><div id="progBar" class="prog-bar"></div></div>
+  </div>
+  <div class="actions">
+    <span id="gateTip" class="gate-tip"></span>
+    <a class="navlink" href="/narration">旁白工作台</a>
+    <a class="navlink" href="/">锚点校对台</a>
+    <a class="navlink primary-link" href="/">写回去锚点台 →</a>
+  </div>
+</header>
+
+<main class="rv-workspace">
+
+  <aside class="rv-panel rv-left">
+    <div class="rv-panel-head">句子导航 <span id="listCount" class="muted"></span></div>
+    <div class="rv-filters">
+      <select id="beatSel" title="按剧情块筛选"></select>
+      <select id="onlySel" title="筛选">
+        <option value="all">全部句子</option>
+        <option value="unconfirmed">只看未确认</option>
+        <option value="flagged">只看需复核</option>
+        <option value="edited">只看已改画面</option>
+      </select>
+      <input id="qInput" type="search" placeholder="搜索旁白 / 人物台词" spellcheck="false">
+    </div>
+    <div id="sentList" class="rv-list"></div>
+    <div class="rv-foot">↑ ↓ 切句　·　Enter 确认并下一句　·　空格 播放/暂停</div>
+  </aside>
+
+  <section class="rv-panel rv-main">
+    <div id="rowHead" class="rv-head"></div>
+
+    <div class="track-box" id="trackBox">
+      <div class="track-ruler" id="ruler"></div>
+      <div class="track-line">
+        <div class="track-label">旁白<br><span class="lab-sub">成片秒 · 锁死</span></div>
+        <div class="track-lane" id="narrLane"></div>
+      </div>
+      <div class="track-line tall">
+        <div class="track-label">画面<br><span class="lab-sub">按刀</span></div>
+        <div class="track-lane" id="videoLane"></div>
+      </div>
+      <div class="track-line dlg">
+        <div class="track-label">人物台词<br><span class="lab-sub">源片秒投影</span></div>
+        <div class="track-lane" id="lineLane"></div>
+      </div>
+      <div class="playhead" id="playhead" hidden><i></i></div>
+    </div>
+
+    <div id="flags" class="rv-flags"></div>
+
+    <div class="rv-player">
+      <div class="rv-player-head">
+        <button id="btnPlay" class="primary">▶ 播放这句</button>
+        <button id="btnStop" title="暂停并复位高亮">暂停</button>
+        <span id="pvInfo" class="muted">按当前会话状态（含未写回改动）临时渲染，不写工程文件</span>
+      </div>
+      <div id="videoBox" class="rv-video-box"><div class="pv-empty">点「播放这句」看三者同步对齐：旁白读到哪、当前是哪一刀、这一刻人物在说什么</div></div>
+    </div>
+  </section>
+
+  <aside class="rv-panel rv-right">
+    <div class="rv-panel-head">候选首镜 <span class="muted">· 改前 / 改后并排</span></div>
+    <div class="cand-nav">
+      <button id="candPrev" title="往前翻 8 个镜头">←</button>
+      <input id="firstInput" type="number" min="1" title="自定义首镜编号" spellcheck="false">
+      <button id="candNext" title="往后翻 8 个镜头">→</button>
+      <button id="candGo" class="primary">看候选</button>
+    </div>
+    <div id="candList" class="cand-list"></div>
+
+    <div class="rv-divider"></div>
+    <div class="rv-panel-sub">改前 / 改后对照 <span id="cmpHint" class="muted"></span></div>
+    <div id="compare" class="compare"><div class="muted">点上方任一候选，逐刀对比画面与人物台词</div></div>
+
+    <div class="rv-right-foot">
+      <button id="btnApply" class="primary" disabled>应用到本句</button>
+      <button id="btnClear">清除本句锚点</button>
+      <p class="rv-note">只改本句这几刀的源片区间，不挪任何刀位、不改刀数/刀长。确认后请到「锚点校对台」写回；重跑 7 步链路会覆盖这些改动。</p>
+    </div>
+  </aside>
+
+</main>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/review.js"></script>
+</body>
+</html>

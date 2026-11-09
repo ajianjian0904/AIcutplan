@@ -1,0 +1,12 @@
+{
+ "effective_cps": 4.9545,
+ "fixed_silence": 0.7327,
+ "instant_cps": 8.204,
+ "voice": "zh-CN-YunxiNeural",
+ "rate": "+50%",
+ "sentences": 164,
+ "chars": 1503,
+ "speech_sec": 303.36,
+ "source": "E:\\workbuddy\\2026-11-05-20-33-31\\ep05\\json\\tts-result.json",
+ "calibrated_at": "2026-11-07T17:20:39"
+}

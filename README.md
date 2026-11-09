@@ -1,2 +1,105 @@
-# AIcutplan
-动漫剪辑，目前针对Ai自动剪辑无法达到人为要求的情况，加入人机结合的剪辑方法
+# AIcutplan · 漫剪校对台
+
+> 动漫剪辑，目前针对 AI 自动剪辑无法达到人为要求的情况，加入人机结合的剪辑方法。
+
+本地运行的动漫速讲（漫剪）校对工作台：把「旁白 / 画面 / 人物台词」统一到同一条时间轴上逐句确认，最后写回 `cutplan.json`，可选导出为剪映草稿继续精修。
+
+服务端只用 Python 标准库 `http.server`，前端无构建，三页共用一套静态文件；除 ffmpeg 外没有硬依赖。
+
+## 三个页面
+
+| 页面 | 路径 | 做什么 |
+|---|---|---|
+| 逐句校对台 | `/review` | **逐句三轨对齐**：旁白（成片秒）、画面（每刀缩略图）、人物台词（源片秒投影到成片轴）。播放时三者同步高亮，可给每句定【首镜, 尾镜】、逐句确认 |
+| 锚点校对台 | `/` | **按剧情块整块平移**源片取段，A/B 抽帧判有没有跳场，确认后写回 |
+| 旁白工作台 | `/narration` | 与 DeepSeek 协作改稿：模板 / 变量注入 / 草稿快照 / 定稿 / 写回 `script.json` / 生成 7 步重跑脚本 |
+
+另有「导出剪映」（在锚点台顶栏）：把成片时间线导出为剪映可打开的明文草稿（整片 / 逐刀 245 段两种模式），供人工在剪映里精修与导出。
+
+## 核心编辑模型
+
+这套工具刻意只做一件事，并且把边界写死：
+
+- **成片时长由旁白 TTS 实测时长决定**，锁死。画面只允许改「从源片哪个时刻开始取」。
+- 所有写回**只改 `cutplan.json` 的 `src_start / src_end`**，`dur / new_start / new_end / sent_ids` 一个都不碰，写前自动备份。
+- 两级编辑，写回时**句级优先于块级**：
+  - 块级：整块平移 Δ，块内所有刀一起移动，长度不变
+  - 句级：给一句定【首镜, 尾镜】，句内 2–3 刀按顺序铺满，只改这几刀，**不挪任何其他刀位**（因此天然避开级联漂移）
+- 不开放：逐刀拖拽、改刀数/刀长、改块长度、AI 自动重排、匹配度打分。理由是四集实测结论——一句旁白平均跨 1.73 刀、每刀固定 1.32s，逐句一镜会让单镜变 1.96s（比对标慢 48%）；且 48% 是演绎刀、52% 是情境刀，后者本就不该跟旁白语义匹配，机器换图的实测结果是「换对 18%、改坏 64%」。
+
+## 工程目录约定
+
+```
+<工程目录>/
+  project.json               # 名称、fps、语速等
+  shotlist.csv               # 镜头表：idx,start,end,dur,motion,bright,ost
+  asr_ja.json                # 语音识别结果（paras: t0/t1/text），语言后缀可为 en/ko/zh
+  json/cutplan.json          # 245 个窗口：src_start/src_end/dur/new_start/new_end/sent_ids
+  json/align.json            # beat_win（刀→块分组）、sent_span、sent_beat
+  json/narration.json        # items：i/text/beat/t0/dur/chars
+  json/script.json           # beats[]：剧情块文案
+  out/01-video-no-ad.mp4     # cut.py 的真实输入，抽帧与切段的时间基准
+  out/mix-rapid.wav          # 最终混音（预览用）
+  out/中文旁白-recap.srt      # 成片字幕（预览烧录用）
+```
+
+## 快速开始
+
+```bash
+# 1) 依赖
+python 3.12
+ffmpeg / ffprobe 在 PATH 上
+
+# 2) 指定工程（二选一）
+set RECAP_PROJECT=<你的工程目录>      # Windows
+export RECAP_PROJECT=<你的工程目录>   # bash
+
+# 3) 启动
+python server.py        # 或双击 start.bat
+# → http://127.0.0.1:8765
+```
+
+界面右上角也可以直接填工程目录点「载入工程」，选择会记进 `studio_state.json`，下次启动自动载入。
+
+### 可选依赖
+
+| 能力 | 需要 | 说明 |
+|---|---|---|
+| 旁白 AI 协作、台词译中 | 环境变量 `DEEPSEEK_API_KEY` | Key 只在内存读取，不写文件、不进日志；缺失时可用「手工粘贴」模式 |
+| 导出剪映草稿 | `pip install pyJianYingDraft==0.3.1` | 需装在某个解释器里，用 `JY_PYTHON` 指定；未指定时自动探测当前解释器与托管 venv |
+
+## 目录结构
+
+```
+server.py            HTTP 服务：工程载入、会话状态、写回、抽帧、预览、路由
+review.py            逐句三轨数据（台词投影到成片轴）、候选首镜、确认进度
+sentence_studio.py   句↔刀映射、句级锚点计算、两层合并、台词查询
+preview_render.py    临时渲染：按刀切源片 + 拼接 + 混音 + 烧字幕 + 首帧海报
+narration.py         旁白模板/草稿/快照/定稿、DeepSeek 客户端、字数预算与只读校验
+asr_pipeline.py      多语 ASR 检测、按批翻译为中文、断点续传
+jianying_export.py   剪映草稿计划/自检/安装
+jianying_worker.py   在装了 pyJianYingDraft 的解释器里生成明文草稿
+web/                 三页前端（index / review / narration）+ 各自 css/js
+templates.json       旁白提示词模板
+tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
+```
+
+## 阶段门禁
+
+- 旁白有**未定稿草稿**时，锚点台与逐句台的写回按钮被锁（后端 `/api/save` 直接返回 409），避免白做。
+- 定稿后继续改稿会自动撤销定稿并重新上锁。
+- 写回之后必须重跑 7 步链路（`build_narr → r5_tts → n3_align → cut → relayout_narr → r6_mix → r7_mux`），否则新的 `cutplan.json` 会覆盖刚做的平移。界面只展示/复制命令，不代为执行。
+
+## 安全边界
+
+- 除「写回 cutplan」「写回 script.json」两个显式动作外，不修改工程目录任何文件；草稿、快照、预览、翻译缓存全部落在本仓库目录下。
+- 写回前自动备份（`*.bak.<时间戳>`），可回滚。
+- `DEEPSEEK_API_KEY` 只从环境变量读，不落盘、不入日志、不进异常信息。
+- 剪映草稿默认只写到 `exports/jianying/`；写入剪映草稿目录需单独确认，且不覆盖同名、不改剪映索引。
+
+## 已知限制
+
+- 逐句确认、块级平移、句级锚点属于**会话状态**（持久化到 `studio_state.json`），重跑 7 步链路会失效。
+- 预览渲染是独立转码，画质上限等于片源；最终成片由 `r7_mux.py` 以 `-c:v copy` 输出，不重编码。
+- 剪映草稿是**单向**的：剪映保存后草稿加密，脚本读不回来；重复导出会覆盖剪映里的人工修改。
+- 说话人分离、剧情解析、工程向导（洗片/镜头切分/字幕轨探测）尚未实现。
