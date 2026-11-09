@@ -32,6 +32,7 @@ import sentence_studio as SS
 import preview_render as PR
 import review as RV
 import pipeline as PL
+import story_parse as SP
 
 ROOT = Path(__file__).resolve().parent
 WEB = ROOT / "web"
@@ -551,6 +552,21 @@ class Handler(BaseHTTPRequestHandler):
                 return self._file(WEB / "deliver.css", "text/css; charset=utf-8")
             if p == "/deliver.js":
                 return self._file(WEB / "deliver.js", "application/javascript; charset=utf-8")
+            if p in ("/story", "/story.html"):
+                return self._file(WEB / "story.html", "text/html; charset=utf-8")
+            if p == "/story.css":
+                return self._file(WEB / "story.css", "text/css; charset=utf-8")
+            if p == "/story.js":
+                return self._file(WEB / "story.js", "application/javascript; charset=utf-8")
+
+            if p == "/api/story/plan":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                return self.json(self.api_story_plan())
+            if p == "/api/story/lines":
+                if not ST.proj:
+                    return self.err("工程未载入")
+                return self.json(self.api_story_lines(q))
 
             if p == "/api/flow/state":
                 return self.json(self.api_flow_state())
@@ -685,6 +701,10 @@ class Handler(BaseHTTPRequestHandler):
             if p == "/api/asr/save":
                 return self.json({"ok": True, "data": PL.save_asr_rows(
                     ST.proj.dir, d.get("changes") or [])})
+            if p == "/api/story/save":
+                return self.json({"ok": True, **self.api_story_save(d)})
+            if p == "/api/story/build":
+                return self.json({"ok": True, "data": self.api_story_build(d)})
             if p.startswith("/api/narr/"):
                 return self.json(self.narr_post(p, d))
             if p == "/api/asr/translate":
@@ -850,6 +870,98 @@ class Handler(BaseHTTPRequestHandler):
                 except (BrokenPipeError, ConnectionResetError):
                     return
                 left -= len(chunk)
+
+    # ------------------------------------------------------------ 剧情台
+    def api_story_plan(self):
+        d = ST.proj.dir
+        plan = SP.load_plan(d)
+        c = SP.cfg(d)
+        blocks = plan.get("blocks") or []
+        bud = plan.get("budget")
+        if blocks and not bud:
+            bud = SP.budget(d, blocks)
+        return {
+            "ok": True,
+            "project": {"name": c["name"], "dir": str(d)},
+            "cfg": {**c, "seg_sec": plan.get("segment") or 200, "frames": plan.get("frames") or 12},
+            "blocks": blocks,
+            "events": plan.get("events") or [],
+            "segments": plan.get("segments") or [],
+            "budget": bud,
+            "meta": {"model": plan.get("block_model") or plan.get("model"),
+                     "updated": plan.get("updated"), "tokens": plan.get("seg_tokens"),
+                     "created": plan.get("created")},
+            "has_script": (d / "json" / "script.json").exists(),
+            "has_cutplan": (d / "json" / "cutplan.json").exists(),
+            "has_plan": bool(blocks),
+        }
+
+    def api_story_lines(self, q):
+        d = ST.proj.dir
+        t0 = float(q.get("t0", 0) or 0)
+        t1 = float(q.get("t1", 0) or 0) or 1e9
+        limit = int(q.get("limit", 60) or 60)
+        subs = SP.zh_subtitles(d)
+        hit = [s for s in subs if s["t0"] >= t0 - 0.01 and s["t0"] < t1]
+        return {"ok": True, "total": len(hit),
+                "lines": [{"t0": s["t0"], "t1": s["t1"], "text": s["text"]} for s in hit[:limit]]}
+
+    def api_story_save(self, d):
+        proj_dir = ST.proj.dir
+        raw = d.get("blocks") or []
+        if not isinstance(raw, list) or not raw:
+            raise RuntimeError("块表为空")
+        out = []
+        for i, b in enumerate(raw):
+            try:
+                t0, t1 = float(b.get("t0")), float(b.get("t1"))
+                tg = float(b.get("target") or 0)
+            except (TypeError, ValueError):
+                raise RuntimeError(f"第 {i + 1} 块的时间不是数字")
+            if t1 <= t0:
+                raise RuntimeError(f"第 {i + 1} 块「{b.get('label', '')}」的终点必须大于起点")
+            ty = str(b.get("type") or "铺垫").strip()
+            if ty not in ("钩子", "铺垫", "冲突", "反转", "爽点", "收尾", "收录"):
+                ty = "铺垫"
+            out.append({"label": str(b.get("label") or f"块{i}")[:8], "type": ty,
+                        "t0": round(t0, 2), "t1": round(t1, 2),
+                        "target": 0.0 if ty == "收录" else max(0.0, round(tg, 1)),
+                        "summary": str(b.get("summary") or "")[:80]})
+        plan = SP.load_plan(proj_dir)
+        plan["blocks"] = out
+        bud = SP.budget(proj_dir, out)
+        plan["budget"] = bud
+        f = SP.save_plan(proj_dir, plan)
+        return {"blocks": out, "budget": bud, "saved": str(f)}
+
+    def api_story_build(self, d):
+        proj_dir = ST.proj.dir
+        plan = SP.load_plan(proj_dir)
+        blocks = plan.get("blocks") or []
+        if not blocks:
+            raise RuntimeError("还没有块表，先做剧情解析或手工建块")
+        what = d.get("what")
+        if what == "script":
+            r = SP.write_script_skeleton(proj_dir, blocks, overwrite=bool(d.get("overwrite")))
+            if r.get("written"):
+                # 骨架换了，旧草稿的块就对不上了：备份后清掉，让旁白台按新块重建
+                draft = NR.ddir(proj_dir) / "draft.json"
+                if draft.exists():
+                    bak = draft.with_suffix(f".json.bak.{datetime.now():%Y%m%d_%H%M%S}")
+                    bak.write_bytes(draft.read_bytes())
+                    draft.unlink()
+                    r["draft_reset"] = str(bak)
+            return r
+        if what == "cutplan":
+            r = SP.write_cutplan(proj_dir, blocks)
+            ST.proj._read()
+            ST.deltas.clear()
+            ST.sent_anchors.clear()
+            ST.confirmed.clear()
+            ST.confirmed_sents.clear()
+            ST.persist()
+            return r
+        raise RuntimeError("未知的落盘目标")
 
     # ------------------------------------------------------------ 制作流水线
     def api_flow_state(self):

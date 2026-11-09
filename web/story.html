@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>剧情台 · AI 解析 + 人工审核</title>
+<link rel="stylesheet" href="/base.css">
+<link rel="stylesheet" href="/story.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">剧情台 <span id="projName" class="brand-sub"></span></div>
+  <nav class="appnav">
+    <a href="/flow">流水线</a>
+    <a href="/shots">镜头台</a>
+    <a href="/asr">台词台</a>
+    <a href="/story" class="on">剧情台</a>
+    <a href="/narration">旁白</a>
+    <a href="/review">逐句校对</a>
+    <a href="/">锚点</a>
+    <a href="/deliver">交付</a>
+  </nav>
+  <div class="actions">
+    <span id="planChip" class="chip"></span>
+    <button id="btnParse" class="primary">AI 解析剧情</button>
+    <button id="btnRefresh">刷新</button>
+  </div>
+</header>
+
+<main class="st-ws">
+  <section class="panel st-left">
+    <div class="panel-head">时间轴 <span class="muted">· 色块=剧情块，细线=AI 识别的事件；点色块跳块</span>
+      <span class="grow"></span>
+      <span class="tl-legend">
+        <span><i class="sw hook"></i>钩子</span><span><i class="sw setup"></i>铺垫</span>
+        <span><i class="sw clash"></i>冲突</span><span><i class="sw twist"></i>反转</span>
+        <span><i class="sw peak"></i>爽点</span><span><i class="sw skip"></i>收录</span>
+      </span>
+    </div>
+    <div class="st-tl">
+      <div class="tl" id="tl">
+        <div class="tl-track" id="tlTrack"></div>
+        <div class="tl-events" id="tlEvents"></div>
+        <div class="tl-ticks" id="tlTicks"></div>
+      </div>
+    </div>
+    <div class="panel-head" style="border-top:1px solid var(--line)">
+      剧情块 <span id="blkCount" class="muted"></span>
+      <span class="grow"></span>
+      <select id="typeFlt" title="按性质筛选">
+        <option value="all">全部</option>
+        <option value="live">只看正片块</option>
+        <option value="skip">只看收录（OP/预告）</option>
+      </select>
+    </div>
+    <div class="st-scroll" id="blkScroll">
+      <table class="tb" id="blkTb">
+        <thead>
+          <tr>
+            <th style="width:30px">#</th>
+            <th style="width:70px">块名</th>
+            <th style="width:66px">性质</th>
+            <th style="width:112px">源片区间</th>
+            <th style="width:60px">成片秒</th>
+            <th>概要 / 操作</th>
+          </tr>
+        </thead>
+        <tbody id="blkBody"></tbody>
+      </table>
+      <div id="blkEmpty" class="empty">
+        还没有剧情骨架<br>
+        <span class="faint">点右上「AI 解析剧情」：模型会读台词 + 抽帧，先出事件表，再合成 12–15 块</span>
+      </div>
+    </div>
+    <div class="st-foot">
+      <span id="sumText" class="muted"></span>
+      <span class="grow"></span>
+      <button id="btnAdd" class="sm">插入一块</button>
+      <button id="btnSave" class="primary sm" disabled>保存修改</button>
+    </div>
+  </section>
+
+  <aside class="st-right">
+    <section class="panel">
+      <div class="panel-head">当前块 <span id="curLabel" class="chip"></span></div>
+      <div class="panel-body" id="curBox"><div class="muted">点左侧任一块</div></div>
+    </section>
+
+    <section class="panel st-budget">
+      <div class="panel-head">预算</div>
+      <div class="panel-body" id="budgetBox"><div class="muted">解析后自动计算</div></div>
+    </section>
+  </aside>
+</main>
+
+<div class="st-bottom">
+  <div class="panel st-run">
+    <div class="panel-head">跑解析 / 落骨架
+      <span class="grow"></span>
+      <span id="jobChip" class="chip">空闲</span>
+      <button id="btnStop" class="sm danger" disabled>停止</button>
+    </div>
+    <div class="st-run-body">
+      <div class="st-opts">
+        <label>分段时长<input id="segInput" type="number" value="200" min="60" max="400" step="20"></label>
+        <label>每段抽帧<input id="frameInput" type="number" value="12" min="4" max="16"></label>
+        <label class="check"><input id="forceChk" type="checkbox"> 忽略缓存重解析</label>
+        <button id="btnCompose" class="sm" title="事件表不动，只重跑块表合成">重合成块表</button>
+      </div>
+      <div class="st-opts">
+        <button id="btnScript" class="sm">写 script 骨架</button>
+        <label class="check"><input id="ovChk" type="checkbox"> 覆盖已有 script.json</label>
+        <button id="btnCutplan" class="sm">生成 cutplan 初版</button>
+        <span class="muted" id="opTip">骨架 = 块名 + 时间锚点 + 空文案，文案在旁白台填</span>
+      </div>
+      <pre id="logBox" class="logbox">解析日志会实时出现在这里。第一次跑约 10–20 分钟（8 段 × 1–3 分钟，推理模型）。</pre>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+<script src="/story.js"></script>
+</body>
+</html>

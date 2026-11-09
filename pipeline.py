@@ -200,6 +200,19 @@ def _cmd_script_script(proj_dir: Path, p: dict):
     return None  # 由「旁白工作台」页面完成，不在流水线里跑
 
 
+def _cmd_story(proj_dir: Path, p: dict) -> list[str]:
+    argv = ["--project", str(proj_dir / "project.json")]
+    if p.get("segment"):
+        argv += ["--segment", str(float(p["segment"]))]
+    if p.get("frames"):
+        argv += ["--frames", str(int(p["frames"]))]
+    if p.get("force"):
+        argv.append("--force")
+    if p.get("compose_only"):
+        argv.append("--compose-only")
+    return [PY, str(ROOT / "story_parse.py")] + argv
+
+
 def _cmd_narr(proj_dir: Path, p: dict) -> list[str] | None:
     s = ensure_script(proj_dir, "build_narr.py")
     return [PY, str(s)] if s else None
@@ -253,9 +266,13 @@ STEPS = [
     {"id": "translate", "group": "台词", "name": "台词译中 · 分批 DeepSeek",
      "hint": "把原文台词按 24 段一批译成中文，断点续传到 asr/<hash>/asr_zh.json。失败重跑只补缺失批，不重译已完成的。",
      "cmd": _cmd_translate, "needs": [], "deps": ["asr"], "run_label": "开始译中", "page": "/asr"},
+    {"id": "story", "group": "文案", "name": "剧情解析 · 台词 + 抽帧",
+     "hint": "按有效段切窗，每段把「中文字幕 + 12 张截图」一起给视觉模型，先出事件表，再合成 12–15 个剧情块（源区间 + 成片秒数）。OP/标题卡标「收录」不进块表。第一次约 5–15 分钟。",
+     "cmd": _cmd_story, "needs": ["segment", "frames", "force"],
+     "deps": ["translate"], "run_label": "开始解析", "page": "/story"},
     {"id": "script", "group": "文案", "name": "剧情文案 · 分块写旁白",
      "hint": "在旁白工作台里和 DeepSeek 一起定每块的解说词，定稿后写回 json/script.json。这一步必须人工参与，流水线不代跑。",
-     "cmd": None, "needs": [], "deps": ["translate"], "page": "/narration", "run_label": "去写文案"},
+     "cmd": None, "needs": [], "deps": ["story"], "page": "/narration", "run_label": "去写文案"},
     {"id": "narr", "group": "文案", "name": "旁白落稿 · 切听觉句 + 铺时长",
      "hint": "script.json → narration.json：按 14 字切听觉句、用实测语速估时长、顺序铺开。成片时间轴由对齐步骤决定。",
      "cmd": _cmd_narr, "needs": [], "deps": ["script"], "run_label": "生成 narration.json"},
@@ -389,6 +406,13 @@ def scan(proj_dir: Path) -> list[dict]:
             a = [{"path": "（工作区缓存）asr/<hash>/asr_zh.json", "label": "中文台词",
                   "ok": bool(n and done >= n), "size": 0, "mtime": 0,
                   "extra": f"{done}/{n} 段已译" if n else "缺 asr 结果"}]
+        elif sid == "story":
+            plan = _json(proj_dir / "json" / "story_plan.json", {}) or {}
+            blk = [b for b in (plan.get("blocks") or []) if b.get("type") != "收录"]
+            ev = len(plan.get("events") or [])
+            tot = sum(float(b.get("target") or 0) for b in blk)
+            a = arts(("json/story_plan.json", "剧情骨架",
+                      f"{len(blk)} 块 · {ev} 事件 · {tot:.0f}s" if blk else None))
         elif sid == "script":
             a = arts(("json/script.json", "剧情块文案", f"{len(beats)} 块 · {chars} 字" if beats else None))
         elif sid == "narr":

@@ -183,6 +183,9 @@ function renderForm(st) {
       <option value="tiny">tiny（最快）</option><option value="small" selected>small（推荐）</option>
       <option value="medium">medium</option><option value="large-v3">large-v3（最准最慢）</option></select></label>`);
     if (k === 'redo') parts.push(`<label class="chk"><input id="pf_redo" type="checkbox"> 全部重新合成（忽略缓存）</label>`);
+    if (k === 'segment') parts.push(`<label>分段时长<input id="pf_segment" type="number" step="20" min="60" max="400" value="200" style="width:74px"></label>`);
+    if (k === 'frames') parts.push(`<label>每段抽帧<input id="pf_frames" type="number" min="4" max="16" value="12" style="width:64px"></label>`);
+    if (k === 'force') parts.push(`<label class="chk"><input id="pf_force" type="checkbox"> 忽略缓存重解析</label>`);
   });
   if (st.manual) {
     f.innerHTML = `<div class="muted" style="font-size:11.5px">这一步必须在页面上人工完成，流水线不代跑。${st.page ? `点上面的「${esc(st.run_label)}」进入。` : ''}</div>`;
@@ -199,6 +202,9 @@ function collectParams() {
   if (g('pf_lang')) p.lang = g('pf_lang').value;
   if (g('pf_size')) p.size = g('pf_size').value;
   if (g('pf_redo')) p.redo = g('pf_redo').checked;
+  if (g('pf_segment')) p.segment = parseFloat(g('pf_segment').value || '200');
+  if (g('pf_frames')) p.frames = parseInt(g('pf_frames').value || '12', 10);
+  if (g('pf_force')) p.force = g('pf_force').checked;
   return p;
 }
 
