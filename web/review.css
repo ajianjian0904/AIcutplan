@@ -68,7 +68,7 @@ input,select{
 /* ---------------- 左：句子列表 ---------------- */
 .rv-filters{display:flex; flex-direction:column; gap:6px; flex:0 0 auto; margin-bottom:9px}
 .rv-filters select,.rv-filters input{width:100%}
-.rv-list{flex:1 1 auto; min-height:0; overflow-y:auto; scrollbar-gutter:stable}
+.rv-list{flex:1 1 auto; min-height:0; overflow-y:auto; scrollbar-gutter:stable; padding-bottom:4px}
 .rv-item{
   display:flex; gap:7px; align-items:flex-start; padding:6px 7px; margin-bottom:3px;
   border:1px solid transparent; border-radius:6px; cursor:pointer;
@@ -146,7 +146,7 @@ input,select{
 .track-line.dlg .track-lane{height:46px}
 .dlg-seg{
   position:absolute; top:3px; height:38px; padding:3px 5px; overflow:hidden;
-  background:var(--teal-50); border:1px solid var(--teal-100); border-radius:4px;
+  background:var(--teal-100); border:1px solid var(--teal-600); border-radius:4px;
   font-size:10.5px; line-height:1.35; color:var(--teal-800); cursor:default; white-space:nowrap;
 }
 .dlg-seg.on{background:var(--teal-600); color:#fff; border-color:var(--teal-600); z-index:2}
@@ -175,6 +175,7 @@ input,select{
 }
 .rv-video-box video{display:block; width:100%; max-height:340px; background:#000}
 .pv-empty{padding:22px 30px; font-size:11.5px; color:var(--faint); text-align:center; line-height:1.7}
+.pv-legend{margin-top:9px; padding-top:9px; border-top:1px dashed var(--line-2); font-size:10.5px; line-height:1.9}
 
 /* ---------------- 右：候选卡 ---------------- */
 .cand-nav{display:flex; gap:5px; align-items:center; flex:0 0 auto; margin-bottom:8px}

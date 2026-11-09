@@ -167,8 +167,11 @@ function renderTracks() {
 
 function renderFlags() {
   if (!CUR) return;
-  $('flags').innerHTML = CUR.flags.length
-    ? CUR.flags.map(f => `<span class="flag ${f.watch ? 'watch' : ''} ${f.k === 'edited' ? 'edited' : ''}">${esc(f.text)}</span>`).join('')
+  // 只刷「需要人看一眼」的提示。ost=1 在本片 404/608 镜、共享边界刀 164/164 句都命中，
+  // 属于常态信息，放在画面轨红点和 title 里，不占提示区。
+  const f = CUR.flags.filter(x => x.watch || x.k === 'edited');
+  $('flags').innerHTML = f.length
+    ? f.map(x => `<span class="flag ${x.watch ? 'watch' : ''} ${x.k === 'edited' ? 'edited' : ''}">${esc(x.text)}</span>`).join('')
     : '<span class="muted">无特别提示 · 顺序顺延即可</span>';
 }
 

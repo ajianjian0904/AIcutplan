@@ -186,7 +186,9 @@ def rows(proj, deltas: dict, anchors: dict, confirmed: set,
                        gap=gap, blank=not has_line)
         all_rows.append({
             "id": sid, "beat": b, "text": s["text"],
-            "t0": s["t0"], "dur": s["dur"], "new": [round(A, 3), round(Z, 3)],
+            # 列表统一显示「成片实际时长」（帧吸附后），与中栏 header 同一口径；
+            # narration.dur 是 TTS 估算，和按 1.32s/刀 排出的成片时长会差几十毫秒。
+            "t0": s["t0"], "dur": round(Z - A, 3), "new": [round(A, 3), round(Z, 3)],
             "wins": s["wins"], "cuts": len(s["wins"]),
             "confirmed": sid in confirmed, "edited": sid in anchors,
             "delta": round(float(deltas.get(b, 0.0) or 0), 3),

@@ -68,7 +68,15 @@
         <button id="btnStop" title="暂停并复位高亮">暂停</button>
         <span id="pvInfo" class="muted">按当前会话状态（含未写回改动）临时渲染，不写工程文件</span>
       </div>
-      <div id="videoBox" class="rv-video-box"><div class="pv-empty">点「播放这句」看三者同步对齐：旁白读到哪、当前是哪一刀、这一刻人物在说什么</div></div>
+      <div id="videoBox" class="rv-video-box">
+        <div class="pv-empty">
+          点「播放这句」看三者同步对齐：旁白读到哪、当前是哪一刀、这一刻人物在说什么
+          <div class="pv-legend">
+            上轨 = 旁白（成片秒，锁死）　·　中轨 = 画面（按刀，可改源片起点）　·　下轨 = 人物台词（源片秒投影到成片轴）<br>
+            空格 播放 / 暂停　·　Enter 确认并下一句　·　↑ ↓ 切句
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
