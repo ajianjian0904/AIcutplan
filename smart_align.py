@@ -161,12 +161,18 @@ def semantic_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
 
 
 def cut_positions(window: tuple[float, float], k: int, shots: list[dict],
-                  guard: tuple[float, float]) -> list[float]:
-    """在源区间 window 内给 k 刀找起点：均匀铺 + 吸附镜头开头 + 不越 guard。"""
+                  guard: tuple[float, float], used: set | None = None) -> list[float]:
+    """在源区间 window 内给 k 刀找起点：均匀铺 + 吸附镜头开头 + 不越 guard。
+
+    used：已占用刀起点（0.1s 精度），吸附时避开，防止相邻句共用同一镜头开头。
+    """
     a0, a1 = max(window[0], guard[0]), min(window[1], guard[1])
     if a1 - a0 < 0.5:
         a0, a1 = window
     starts = [s["a"] for s in shots if a0 - 0.02 <= s["a"] <= a1]
+    if used is not None:
+        free = [x for x in starts if round(x, 1) not in used]
+        starts = free or starts
     usable = max(0.6, a1 - a0 - CUT)
     if k <= 1:
         raw = [a0]
@@ -177,9 +183,13 @@ def cut_positions(window: tuple[float, float], k: int, shots: list[dict],
     for i, t in enumerate(raw):
         t = next((x for x in starts if abs(x - t) <= SNAP and x >= prev_end + MIN_STEP - 0.02),
                  t if t >= prev_end + MIN_STEP else prev_end + MIN_STEP)
+        if used is not None and round(t, 1) in used:
+            t = t + 0.7                      # 微移避开已用镜头开头
         t = min(t, a1 - 0.3) if a1 - 0.3 > t else t
         out.append(round(max(a0, t), 3))
         prev_end = t + CUT
+    if used is not None:
+        used.update(round(x, 1) for x in out)
     return out
 
 
@@ -271,14 +281,21 @@ def align(proj_dir: Path) -> dict:
         else:
             ev_idx = assign_sents_to_events(sents, ev_in)
 
-        # 每句的画面窗口：事件区间，太窄则向相邻事件借
-        src_windows = []
-        for i, e_j in enumerate(ev_idx):
-            e = ev_in[e_j]
+        # 每句的画面窗口：连续同事件的句共享一个事件区间 → 按刀数切成不重叠子区间，
+        # 否则同样的铺刀公式会产出完全相同的刀位，画面原样重复。
+        src_windows: list[tuple[float, float] | None] = [None] * len(sents)
+        head_guard = shots[0]["b"] if bi == 0 else 0.0   # 第一块跳过片头（黑屏标题卡+制作名单）
+        i2 = 0
+        while i2 < len(sents):
+            j2 = i2
+            while j2 + 1 < len(sents) and ev_idx[j2 + 1] == ev_idx[i2]:
+                j2 += 1
+            e = ev_in[ev_idx[i2]]
             e0, e1 = float(e["t0"]), float(e["t1"])
-            need = ks[i] * CUT
-            guard_l = float(ev_in[e_j - 1]["t1"]) if e_j > 0 else bl["t0"]
-            guard_r = float(ev_in[e_j + 1]["t0"]) if e_j + 1 < len(ev_in) else bl["t1"]
+            K = sum(ks[x] for x in range(i2, j2 + 1))
+            need = K * CUT
+            guard_l = float(ev_in[ev_idx[i2] - 1]["t1"]) if ev_idx[i2] > 0 else bl["t0"]
+            guard_r = float(ev_in[ev_idx[i2] + 1]["t0"]) if ev_idx[i2] + 1 < len(ev_in) else bl["t1"]
             while e1 - e0 < need and (e0 > guard_l or e1 < guard_r):
                 grow_l = (e0 - guard_l) if e0 > guard_l else 0.0
                 grow_r = (guard_r - e1) if e1 < guard_r else 0.0
@@ -288,15 +305,24 @@ def align(proj_dir: Path) -> dict:
                     e1 = min(guard_r, e1 + need - (e1 - e0))
                 else:
                     break
-            src_windows.append((e0, e1))
+            if bi == 0 and e1 - head_guard >= need:
+                e0 = max(e0, head_guard)
+            cur = e0
+            for x in range(i2, j2 + 1):
+                seg = (e1 - e0) * ks[x] / max(1, K)
+                src_windows[x] = (cur, cur + seg)
+                cur += seg
+            i2 = j2 + 1
 
         # 铺刀：句按顺序；块的最后一刀吃掉取整余量，保证 Σdur == span_b
         # 同时记录每句的窗口序号区间（relayout_smart 用它把音频精确压在该句自己的画面上）
         beat_done = 0.0
+        used_starts: set = set()
         for i, s in enumerate(sents):
             k_i = ks[i]
             i0w = len(new_wins)
-            positions = cut_positions(src_windows[i], k_i, shots, (bl["t0"], bl["t1"]))
+            positions = cut_positions(src_windows[i], k_i, shots, (bl["t0"], bl["t1"]),
+                                      used_starts)
             for jx, p in enumerate(positions):
                 is_last = (i == len(sents) - 1 and jx == k_i - 1)
                 dur = max(0.6, span_b - beat_done) if is_last else CUT
