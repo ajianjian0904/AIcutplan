@@ -27,7 +27,9 @@ def main() -> int:
     bad = []
     for it in n:
         i = it["i"]
-        cuts = [w for w in al["windows"] if i in (w.get("sent_ids") or [])]
+        rng = al.get("sent_win_idx", {}).get(str(i))
+        cuts = (al["windows"][rng[0]:rng[1] + 1] if rng
+                else [w for w in al["windows"] if i in (w.get("sent_ids") or [])])
         if not cuts:
             continue
         g = final_map.get(i)
