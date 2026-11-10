@@ -67,8 +67,8 @@ _FINAL_CACHE: dict[str, dict] = {}
 def final_info(proj) -> dict:
     """最终成片规格（用于界面澄清：预览画质 ≠ 导出画质）。"""
     d = proj.dir / "out"
-    p = next((x for x in [d / "03-rapid-narration.mp4", d / "02-video-rapid.mp4"]
-              if x.is_file()), None)
+    p = next((x for x in [d / "03-rapid-narration-sub.mp4", d / "03-rapid-narration.mp4",
+                          d / "02-video-rapid.mp4"] if x.is_file()), None)
     if p is None:
         return {"exists": False}
     ck = f"{p}|{int(p.stat().st_mtime)}"

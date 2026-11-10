@@ -535,9 +535,11 @@ def write_cutplan(proj_dir, blocks: list, lead: float = 0.10, cut: float = 1.32)
                             "sent_ids": []})
             cur += (z - a)
             done_in_block += (z - a)
+    src_dur = round(max((s["b"] for s in shots), default=cur), 3)
     plan_f.write_text(json.dumps({"windows": windows,
                                   "stats": {"cuts": len(windows), "duration": round(cur, 2),
-                                            "blocks": len(live), "source": "story_plan"}},
+                                            "blocks": len(live), "src_dur": src_dur,
+                                            "source": "story_plan"}},
                                  ensure_ascii=False, indent=1), encoding="utf-8")
 
     # n3 需要 shots-cache.json（镜头边界表）

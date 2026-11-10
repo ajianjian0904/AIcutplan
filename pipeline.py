@@ -75,7 +75,10 @@ def probe_duration(p: Path) -> float:
 
 
 def ensure_script(proj_dir: Path, name: str) -> Path | None:
-    """工程内有同名脚本就用工程的（多数脚本按 cwd 读写），否则从 skill 复制一份过去。"""
+    """工程内有同名脚本就用工程的（多数脚本按 cwd 读写），否则从 skill 复制一份过去。
+
+    skill 里的脚本都依赖同目录的 common.py，复制时一并带上，否则 import 会失败。
+    """
     local = proj_dir / name
     if local.exists():
         return local
@@ -83,6 +86,9 @@ def ensure_script(proj_dir: Path, name: str) -> Path | None:
     if src.exists():
         try:
             shutil.copy2(src, local)
+            dep = SKILL / "common.py"
+            if dep.exists() and not (proj_dir / "common.py").exists():
+                shutil.copy2(dep, proj_dir / "common.py")
             return local
         except OSError:
             return src
@@ -228,9 +234,9 @@ def _cmd_tts(proj_dir: Path, p: dict) -> list[str] | None:
     return [PY, str(s)] + argv
 
 
-def _cmd_align(proj_dir: Path, p: dict) -> list[str] | None:
-    s = ensure_script(proj_dir, "n3_align.py")
-    return [PY, str(s), "--project", str(proj_dir / "project.json")] if s else None
+def _cmd_align(proj_dir: Path, p: dict) -> list[str]:
+    """先重建初版 cutplan 再对齐：n3 把 cutplan 当旧轴用，二次对齐前必须回到 script 的轴。"""
+    return [PY, str(ROOT / "align_chain.py"), "--project", str(proj_dir / "project.json")]
 
 
 def _cmd_cut(proj_dir: Path, p: dict) -> list[str] | None:
@@ -248,14 +254,21 @@ def _cmd_mix(proj_dir: Path, p: dict) -> list[str] | None:
     return [PY, str(s), "--project", str(proj_dir / "project.json")] if s else None
 
 
+def _cmd_subtitle(proj_dir: Path, p: dict) -> list[str]:
+    argv = ["--project", str(proj_dir / "project.json")]
+    if p.get("burn"):
+        argv.append("--burn")
+    return [PY, str(ROOT / "make_srt.py")] + argv
+
+
 def _cmd_mux(proj_dir: Path, p: dict) -> list[str] | None:
     s = ensure_script(proj_dir, "r7_mux.py")
     return [PY, str(s), "--project", str(proj_dir / "project.json")] if s else None
 
 
 STEPS = [
-    {"id": "prepare", "group": "素材", "name": "洗片 · 去 editlist 复制 + 抽音",
-     "hint": "把源片按流复制到 out/01-video-no-ad.mp4，再抽一条 48k 双声道 wav 给后面的 ASR 与混音用。不重编码，几秒到几十秒。",
+    {"id": "prepare", "group": "素材", "name": "洗片 · 转码/复制 + 抽音",
+     "hint": "源片是 h264 8bit 就流复制（快）；10bit / HEVC / 带 ASS 字幕轨则转 H.264 8bit（不然浏览器与剪映都不认）。同时抽一条 48k 双声道 wav 给 ASR 与混音。",
      "cmd": _cmd_prepare, "needs": [], "deps": [], "run_label": "开始洗片"},
     {"id": "shots", "group": "素材", "name": "镜头切分 · 场景变化检测",
      "hint": "ffmpeg 场景检测出切点，再按音频能量标出「有原声」的镜头，写成 shotlist.csv。阈值低一点切得多、高一点会漏切。",
@@ -282,6 +295,7 @@ STEPS = [
     {"id": "align", "group": "画面", "name": "旁白对齐 · n3 排刀",
      "hint": "按每句实测语音长度算需要几刀（固定 1.32s/刀），生成 cutplan.json + align.json 的句↔刀映射。",
      "cmd": _cmd_align, "needs": [], "deps": ["tts"], "run_label": "开始对齐"},
+
     {"id": "cut", "group": "画面", "name": "按刀切片 · 重剪无声片",
      "hint": "按 cutplan 逐刀从源片切出并吸附到帧网格，拼出 out/02-video-rapid.mp4。这一步最慢，要读整条源片。",
      "cmd": _cmd_cut, "needs": [], "deps": ["align"], "run_label": "开始切片"},
@@ -294,6 +308,9 @@ STEPS = [
     {"id": "mux", "group": "合成", "name": "合流成片 · 烧字幕",
      "hint": "画面流直复制（不重编码）+ 混音 + 旁白字幕，输出 out/03-rapid-narration.mp4。画质上限等于片源。",
      "cmd": _cmd_mux, "needs": [], "deps": ["mix"], "run_label": "合成成片"},
+    {"id": "subtitle", "group": "合成", "name": "字幕 · 生成 srt + 烧进成片",
+     "hint": "按 narration.json 的最终时间轴生成 out/中文旁白-recap.srt；勾「烧入」则重编码成 03-rapid-narration-sub.mp4（3 分钟内，crf 18）。抖音上传只认烧死的字幕，不认软字幕轨。",
+     "cmd": _cmd_subtitle, "needs": ["burn"], "deps": ["mux"], "run_label": "生成字幕并烧入"},
     {"id": "review", "group": "校对", "name": "三轨校对 · 逐句定画面",
      "hint": "旁白 / 画面 / 人物台词同轴对齐，逐句确认，给不对的句子改首尾镜。改完要在锚点台写回。",
      "cmd": None, "needs": [], "deps": ["cut"], "page": "/review", "run_label": "去校对"},
@@ -442,8 +459,20 @@ def scan(proj_dir: Path) -> list[dict]:
             a = arts(("json/cutplan.json", "待校对刀表", "在 /review 逐句确认" if wins else None))
         elif sid == "anchor":
             a = arts(("json/cutplan.json", "已写回刀表", "改完要在锚点台写回"))
+        elif sid == "subtitle":
+            sub = proj_dir / "out" / "03-rapid-narration-sub.mp4"
+            a = arts(("out/中文旁白-recap.srt", "旁白字幕", None),
+                     ("out/03-rapid-narration-sub.mp4", "带字幕成片",
+                      "已烧入" if sub.exists() else None))
+            for x in a:
+                if x["path"].endswith("-sub.mp4"):
+                    x["opt"] = True
+                    if not x["ok"]:
+                        x["extra"] = "未烧入（可选）"
         elif sid == "deliver":
-            a = arts(("out/03-rapid-narration.mp4", "成片", None))
+            sub = proj_dir / "out" / "03-rapid-narration-sub.mp4"
+            a = arts(("out/03-rapid-narration-sub.mp4", "成片（带字幕）", None)
+                     if sub.exists() else ("out/03-rapid-narration.mp4", "成片", None))
             jy_dir = ROOT / "exports" / "jianying"
             n_draft = len([p for p in jy_dir.glob("*") if p.is_dir()]) if jy_dir.is_dir() else 0
             a.append({"path": "exports/jianying/", "label": "剪映草稿", "ok": n_draft > 0,

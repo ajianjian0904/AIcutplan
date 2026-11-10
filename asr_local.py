@@ -136,6 +136,13 @@ def main() -> int:
 
     out.write_text(json.dumps({"model": a.size, "lang": a.lang, "paras": rows},
                               ensure_ascii=False, indent=1), encoding="utf-8")
+    # cut.py 要做「对白时间轴映射」，读的是 json/ja-segments.json（不论语言都叫这个名字）
+    (d / "json").mkdir(exist_ok=True)
+    (d / "json" / "ja-segments.json").write_text(json.dumps(
+        {"segments": [{"start": r["t0"], "end": r["t1"], "text": r["text"]} for r in rows]},
+        ensure_ascii=False, indent=1), encoding="utf-8")
+    print(f"[asr] 对白段 → json/ja-segments.json（{len(rows)} 段，供 cut 做时间轴映射）", flush=True)
+
     txt_f = d / f"asr_{a.lang}.txt"
     with txt_f.open("w", encoding="utf-8") as f:
         for r in rows:

@@ -6,12 +6,12 @@
 
 服务端只用 Python 标准库 `http.server`，前端无构建，三页共用一套静态文件；除 ffmpeg 外没有硬依赖。
 
-## 七个页面
+## 八个页面
 
 | 页面 | 路径 | 做什么 |
 |---|---|---|
-| 制作流水线 | `/flow` | **一集从 0 到成片的总控**：16 步按产物自动判定状态，可直接运行洗片 / 切分 / ASR / 译中 / 剧情解析 / 落稿 / TTS / 对齐 / 切片 / 重排 / 混音 / 合流，日志实时回传；也是新建工程的入口 |
-| 镜头台 | `/shots` | **镜头表审阅**：608 镜带缩略图、时长分布；合并 / 删除 / 切分 / 挪边界 / 标原声；有效段写回 `project.json` |
+| 制作流水线 | `/flow` | **一集从 0 到成片的总控**：17 步按产物自动判定状态，可直接运行洗片 / 切分 / ASR / 译中 / 剧情解析 / 落稿 / TTS / 对齐 / 切片 / 重排 / 混音 / 合流 / 字幕烧入，日志实时回传；也是新建工程的入口 |
+| 镜头台 | `/shots` | **镜头表审阅**：逐镜缩略图、时长分布；合并 / 删除 / 切分 / 挪边界 / 标原声；有效段写回 `project.json` |
 | 台词台 | `/asr` | **原文与中文译文对照**：逐段可改，只改文本不动时间戳；就地触发分批译中 |
 | 剧情台 | `/story` | **AI 解析剧情 + 人工审核**：模型读「字幕 + 抽帧」出事件表，再合成 12–15 个剧情块；可改块名 / 性质 / 边界 / 成片秒数，实时算字数预算；一键落 `script` 骨架与 `cutplan` 初版 |
 | 逐句校对台 | `/review` | **逐句三轨对齐**：旁白（成片秒）、画面（每刀缩略图）、人物台词（源片秒投影到成片轴）。播放时三者同步高亮，可给每句定【首镜, 尾镜】、逐句确认 |
@@ -19,7 +19,7 @@
 | 旁白工作台 | `/narration` | 与 DeepSeek 协作改稿：模板 / 变量注入 / 草稿快照 / 定稿 / 写回 `script.json` / 生成 7 步重跑脚本 |
 | 交付台 | `/deliver` | **成片播放与验收**（Range 拖动）、临时预览渲染、导出剪映草稿（整片 / 逐刀） |
 
-## 制作流程（流水线 16 步）
+## 制作流程（流水线 17 步）
 
 ```
 素材  洗片 → 镜头切分
@@ -27,7 +27,7 @@
 文案  剧情解析（AI，机器出骨架 + 人审核）→ 剧情文案（人工，旁白工作台）→ 旁白落稿
 旁白  配音 TTS
 画面  旁白对齐 → 按刀切片 → 时间线重排
-合成  混音 → 合流成片
+合成  混音 → 合流成片 → 字幕（烧入）
 校对  三轨校对（人工，逐句台）→ 写回 cutplan（人工，锚点台）
 交付  预览 / 导出剪映
 ```
@@ -50,6 +50,44 @@
 - **生成 cutplan 初版** → `json/cutplan.json`（每块按 `target/1.32` 铺刀，块内均匀取镜，`new_start` 累计） + `json/shots-cache.json`
 
 实测（EP05，1420s / 8 段）：每段 10–35s、8–10k tokens，全片约 4 分钟、约 60k tokens。模型会把 OP/标题卡当剧情，所以这一步**必须人审**——这正是它留在页面上的原因。
+
+## 全自动跑通（跳过人工审核）
+
+```bash
+# 一次跑完：洗片 → 切分 → ASR → 译中 → 剧情解析 → 自动写稿 → TTS → 对齐 → 切片 → 重排 → 混音 → 合流 → 字幕
+python prepare_media.py  --project <pj>                      # 10bit/HEVC/带 ASS 自动转 H.264 8bit
+python shots_scan.py     --project <pj> --scene 0.30
+python asr_local.py      --project <pj> --lang ja --size small
+python asr_pipeline.py   --project <pj> --batch 24           # 台词译中
+python story_parse.py    --project <pj> --segment 200 --frames 12
+python story_parse.py    --project <pj> --write-script --write-cutplan
+python auto_script.py    --project <pj>                      # AI 整稿 → 补缺块 → 定稿 → 写回
+python auto_script.py    --project <pj> --fit                # 超预算的块压缩
+python auto_script.py    --project <pj> --expand             # 偏短的块扩写
+python align_chain.py    --project <pj>                      # 重建初版 cutplan + n3 对齐
+python cut.py            --project <pj> --force
+python relayout_narr.py  (cwd=工程目录)
+python r6_mix.py         --project <pj>
+python r7_mux.py         --project <pj>
+python make_srt.py       --project <pj> --burn               # 出 srt 并烧进成片
+```
+
+实测一集（`[NanakoRaws] Tsuihou ... - 01`，23.8 分钟 1080p HEVC 10bit，1429.9s）：
+
+| 阶段 | 耗时 | 产物 |
+|---|---|---|
+| 洗片（10bit → H.264 8bit 1080p） | 8 分 | 391MB mp4 + 260MB wav |
+| 镜头切分（scene 0.30） | 58s | 290 镜，中位 3.25s |
+| ASR（faster-whisper small / CUDA float32） | 151s | 404 段 |
+| 台词译中（17 批） | 147s | 404/404，35k tokens |
+| 剧情解析（8 段 × 12 帧） | 188s | 100 事件 → 14 正片块 + 1 收录，48k tokens |
+| 自动写稿 + 压缩 + 补足 | 6 分 | 1325 字 / 127 句 |
+| TTS（edge-tts） | 13–161s | 127 句 / 253.9s |
+| 对齐 + 切片 + 重排 + 混音 + 合流 | 3 分 | 193 刀 / 254.5s |
+| 字幕烧入 | 79s | 127 条，92MB |
+
+成片验收（`r7_mux` 自检）：时长 254.5s ✓、切点密度 45.5/分 ✓、段数 193 ✓、字/刀 6.21 ✓、
+旁白覆盖 93.8% ✓、响度 −13.4 LUFS ✓、LRA 2.7 ✓；旁白字数 1198（目标 1350+）、句数 127（目标 130+）双双略低。
 
 ## 核心编辑模型
 
@@ -116,6 +154,9 @@ sentence_studio.py   句↔刀映射、句级锚点计算、两层合并、台�
 preview_render.py    临时渲染：按刀切源片 + 拼接 + 混音 + 烧字幕 + 首帧海报
 narration.py         旁白模板/草稿/快照/定稿、DeepSeek 客户端、字数预算与只读校验
 asr_pipeline.py      多语 ASR 检测、按批翻译为中文、断点续传（含 CLI，供流水线调用）
+auto_script.py       自动写稿：整稿生成 → 补缺块 → 按预算压缩/扩写 → 定稿写回
+align_chain.py       对齐前置：重建初版 cutplan（回到 script 轴）再跑 n3
+make_srt.py          narration.json → srt，可选烧进成片
 jianying_export.py   剪映草稿计划/自检/安装
 jianying_worker.py   在装了 pyJianYingDraft 的解释器里生成明文草稿
 web/                 七页前端 + 共用底座 base.css
@@ -143,5 +184,7 @@ tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
 - 预览渲染是独立转码，画质上限等于片源；最终成片由 `r7_mux.py` 以 `-c:v copy` 输出，不重编码。
 - 剪映草稿是**单向**的：剪映保存后草稿加密，脚本读不回来；重复导出会覆盖剪映里的人工修改。
 - 镜头表的 `motion / bright` 两列在自动切分时不计算（填 0），只有历史工程自带；校对只用 `ost`。
-- 流水线的「剧情文案 / 三轨校对 / 写回」是人工步骤，页面只给跳转，不代跑。
+- 流水线的「剧情文案 / 三轨校对 / 写回」是人工步骤，页面只给跳转，不代跑；要全自动用 `auto_script.py`（质量会低于人工审）。
+- **对齐前必须重建初版 cutplan**（`align_chain.py` 已内置）。n3 把 cutplan 当旧轴查块源区间，跑完又会把 cutplan 覆写成新轴；二次对齐若不重建，anchor 与新轴错位（实测偏差 47.9s），刀数少算、多出的旁白在 relayout 被丢掉（127 句掉到 103 句，成片 241s 变 208s）。
+- AI 自动写稿普遍偏保守：整稿 2196 字（预算 1503）→ 压缩到 1268 → 补足到 1325，仍低于 1350 的下限。要达标需要人工加料或调高 `--expand` 阈值。
 - 说话人分离、剧情解析尚未实现。

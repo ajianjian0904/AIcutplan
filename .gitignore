@@ -8,6 +8,7 @@ __pycache__/
 
 # 会话状态：含本机工程绝对路径与未写回改动，不入库
 studio_state.json
+studio_state.json.*
 
 # 工作区记忆/会话数据（含本机路径与内部记录）
 .workbuddy/
