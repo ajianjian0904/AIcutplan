@@ -64,7 +64,7 @@ python story_parse.py    --project <pj> --write-script --write-cutplan
 python auto_script.py    --project <pj>                      # AI 整稿 → 补缺块 → 定稿 → 写回
 python auto_script.py    --project <pj> --fit                # 超预算的块压缩
 python auto_script.py    --project <pj> --expand             # 偏短的块扩写
-python align_chain.py    --project <pj>                      # 重建初版 cutplan + n3 对齐
+python align_chain.py    --project <pj>                      # 句级事件对齐（句→事件→画面）
 python cut.py            --project <pj> --force
 python relayout_narr.py  (cwd=工程目录)
 python r6_mix.py         --project <pj>
@@ -155,7 +155,10 @@ preview_render.py    临时渲染：按刀切源片 + 拼接 + 混音 + 烧字�
 narration.py         旁白模板/草稿/快照/定稿、DeepSeek 客户端、字数预算与只读校验
 asr_pipeline.py      多语 ASR 检测、按批翻译为中文、断点续传（含 CLI，供流水线调用）
 auto_script.py       自动写稿：整稿生成 → 补缺块 → 按预算压缩/扩写 → 定稿写回
-align_chain.py       对齐前置：重建初版 cutplan（回到 script 轴）再跑 n3
+smart_align.py       句级事件对齐：句→事件→画面三层映射，替代 n3 的块级均匀铺刀
+relayout_smart.py    句级重排：音频 t0 精确压在该句第一刀的成片起点
+verify_sync.py       校验：刀-事件命中率、音频是否在句自己的刀内
+align_chain.py       对齐入口（默认 smart_align，--classic 退回 n3）
 make_srt.py          narration.json → srt，可选烧进成片
 jianying_export.py   剪映草稿计划/自检/安装
 jianying_worker.py   在装了 pyJianYingDraft 的解释器里生成明文草稿
@@ -185,6 +188,6 @@ tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
 - 剪映草稿是**单向**的：剪映保存后草稿加密，脚本读不回来；重复导出会覆盖剪映里的人工修改。
 - 镜头表的 `motion / bright` 两列在自动切分时不计算（填 0），只有历史工程自带；校对只用 `ost`。
 - 流水线的「剧情文案 / 三轨校对 / 写回」是人工步骤，页面只给跳转，不代跑；要全自动用 `auto_script.py`（质量会低于人工审）。
-- **对齐前必须重建初版 cutplan**（`align_chain.py` 已内置）。n3 把 cutplan 当旧轴查块源区间，跑完又会把 cutplan 覆写成新轴；二次对齐若不重建，anchor 与新轴错位（实测偏差 47.9s），刀数少算、多出的旁白在 relayout 被丢掉（127 句掉到 103 句，成片 241s 变 208s）。
+- **对齐是句级的**：`smart_align` 把每句按语音时长对应到剧情事件（keep 加权两指针配对），刀只落在所配事件的源区间内，`relayout_smart` 再把音频精确压在该句自己的刀上。实测 EP01：127/127 句音画逐句同源、刀-事件命中率 100%。旧 n3 是块级均匀铺刀，"句讲 A、画演 B"是常态（这就是第一版样片旁白和画面对不上的原因）。
 - AI 自动写稿普遍偏保守：整稿 2196 字（预算 1503）→ 压缩到 1268 → 补足到 1325，仍低于 1350 的下限。要达标需要人工加料或调高 `--expand` 阈值。
 - 说话人分离、剧情解析尚未实现。

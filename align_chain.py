@@ -53,12 +53,19 @@ def axis_drift(proj_dir: Path) -> float:
 
 
 def main() -> int:
-    pj = Path(sys.argv[1]).expanduser().resolve() if len(sys.argv) > 1 else None
-    if not pj:
-        ap = __import__("argparse").ArgumentParser()
-        ap.add_argument("--project", required=True)
-        pj = Path(ap.parse_args().project).expanduser().resolve()
+    ap = __import__("argparse").ArgumentParser()
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--classic", action="store_true",
+                    help="退回 n3_align 的块级均匀铺刀（旧行为）")
+    a = ap.parse_args()
+    pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
+
+    if not a.classic:
+        import smart_align as SA
+        r = SA.align(proj_dir)
+        print(f"[句级对齐] {r['cuts']} 刀 / {r['duration']}s / {r['beats']} 块", flush=True)
+        return 0
 
     plan = SP.load_plan(proj_dir)
     blocks = plan.get("blocks") or []

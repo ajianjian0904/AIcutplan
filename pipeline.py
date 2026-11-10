@@ -244,9 +244,9 @@ def _cmd_cut(proj_dir: Path, p: dict) -> list[str] | None:
     return [PY, str(s), "--project", str(proj_dir / "project.json"), "--force"] if s else None
 
 
-def _cmd_relayout(proj_dir: Path, p: dict) -> list[str] | None:
-    s = ensure_script(proj_dir, "relayout_narr.py")
-    return [PY, str(s)] if s else None
+def _cmd_relayout(proj_dir: Path, p: dict) -> list[str]:
+    # 句级精确重排（音频压在该句自己的画面上）；旧 relayout_narr 是块内等比近似
+    return [PY, str(ROOT / "relayout_smart.py"), "--project", str(proj_dir / "project.json")]
 
 
 def _cmd_mix(proj_dir: Path, p: dict) -> list[str] | None:
