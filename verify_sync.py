@@ -20,6 +20,8 @@ def main() -> int:
     n = json.load(open(d / "narration.json", encoding="utf-8"))["items"]
     sent_beat = {int(k): v for k, v in al["sent_beat"].items()}
     blocks = [b for b in (sp.get("blocks") or []) if b["type"] != "收录"]
+    # 语义配对（含跨块覆盖）：每句的"应配事件"来自 sent_event_map_final
+    final_map = {int(k): int(v) for k, v in (sp.get("sent_event_map_final") or {}).items()}
 
     total = hit = 0
     bad = []
@@ -28,15 +30,21 @@ def main() -> int:
         cuts = [w for w in al["windows"] if i in (w.get("sent_ids") or [])]
         if not cuts:
             continue
-        b = sent_beat[i]
-        bl = blocks[b] if b < len(blocks) else None
-        ev_in = [e for e in events
-                 if bl and float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
+        g = final_map.get(i)
+        e0, e1 = (float(events[g]["t0"]), float(events[g]["t1"])) if g is not None else (None, None)
+        if e0 is None:
+            b = sent_beat[i]
+            bl = blocks[b] if b < len(blocks) else None
+            ev_in = [e for e in events
+                     if bl and float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
         for w in cuts:
             mid = (w["src_start"] + w["src_end"]) / 2
             total += 1
-            e = next((e for e in ev_in if float(e["t0"]) <= mid < float(e["t1"])), None)
-            if e:
+            if e0 is not None:      # 刀中点落在应配事件 ±2s 内即算命中（事件边界有粗粒度）
+                ok = e0 - 2 <= mid <= e1 + 2
+            else:
+                ok = any(float(e["t0"]) <= mid < float(e["t1"]) for e in ev_in)
+            if ok:
                 hit += 1
             elif len(bad) < 12:
                 bad.append((i, it["text"][:18], round(mid)))
