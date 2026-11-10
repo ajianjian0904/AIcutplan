@@ -64,7 +64,8 @@ python story_parse.py    --project <pj> --write-script --write-cutplan
 python auto_script.py    --project <pj>                      # AI 整稿 → 补缺块 → 定稿 → 写回
 python auto_script.py    --project <pj> --fit                # 超预算的块压缩
 python auto_script.py    --project <pj> --expand             # 偏短的块扩写
-python align_chain.py    --project <pj>                      # 句级事件对齐（句→事件→画面）
+python shot_desc.py      --project <pj>                      # 全片镜头描述（可选，启用后句镜按内容匹配）
+python align_chain.py    --project <pj>                      # 整镜头对齐（句→事件→镜头，语音时长驱动）
 python cut.py            --project <pj> --force
 python relayout_narr.py  (cwd=工程目录)
 python r6_mix.py         --project <pj>
@@ -155,7 +156,9 @@ preview_render.py    临时渲染：按刀切源片 + 拼接 + 混音 + 烧字�
 narration.py         旁白模板/草稿/快照/定稿、DeepSeek 客户端、字数预算与只读校验
 asr_pipeline.py      多语 ASR 检测、按批翻译为中文、断点续传（含 CLI，供流水线调用）
 auto_script.py       自动写稿：整稿生成 → 补缺块 → 按预算压缩/扩写 → 定稿写回
-smart_align.py       句级事件对齐：句→事件→画面三层映射，替代 n3 的块级均匀铺刀
+smart_align.py       整镜头剪辑引擎：语音时长驱动选镜（博主节奏），句→事件→镜头三层语义匹配
+shot_desc.py         镜头描述层：全片逐镜 VLM 一句话描述（json/shots_desc.json）
+audit_frames.py      成片质检：逐句抽帧让视觉模型判「画面是否在演这句话」
 relayout_smart.py    句级重排：音频 t0 精确压在该句第一刀的成片起点
 verify_sync.py       校验：刀-事件命中率、音频是否在句自己的刀内
 align_chain.py       对齐入口（默认 smart_align，--classic 退回 n3）
@@ -188,6 +191,7 @@ tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
 - 剪映草稿是**单向**的：剪映保存后草稿加密，脚本读不回来；重复导出会覆盖剪映里的人工修改。
 - 镜头表的 `motion / bright` 两列在自动切分时不计算（填 0），只有历史工程自带；校对只用 `ost`。
 - 流水线的「剧情文案 / 三轨校对 / 写回」是人工步骤，页面只给跳转，不代跑；要全自动用 `auto_script.py`（质量会低于人工审）。
-- **对齐是句级的**：`smart_align` 把每句按语音时长对应到剧情事件（keep 加权两指针配对），刀只落在所配事件的源区间内，`relayout_smart` 再把音频精确压在该句自己的刀上。实测 EP01：127/127 句音画逐句同源、刀-事件命中率 100%。旧 n3 是块级均匀铺刀，"句讲 A、画演 B"是常态（这就是第一版样片旁白和画面对不上的原因）。
+- **剪辑节奏是博主模板**：整镜头选择（全长截 0.8–3.2s、起止吸附镜头边界、一镜只用一次、语音时长驱动），约 29 切/分、单镜中位 2.2s——对齐抖音头部解说博主的节奏（26 切/分、1.6s）。旧 v8 模板的 1.32s 均匀刀已废弃（45 切/分、79% 镜中起刀是"卡顿感"来源）。语速默认 +35%（原 +50%，去尾静音后实际 8.3 字/s 过快）；混音旁白区原声 −16dB ducking（原 −50dB 静音）。
+- **对齐是三层语义的**：句→事件（DeepSeek 配对+跨块覆盖）→镜头（句镜匹配，按镜头描述挑画面）；`relayout_smart` 把音频精确压在该句自己的刀上。没有镜头描述层时退回事件内时序取镜。
 - AI 自动写稿普遍偏保守：整稿 2196 字（预算 1503）→ 压缩到 1268 → 补足到 1325，仍低于 1350 的下限。要达标需要人工加料或调高 `--expand` 阈值。
 - 说话人分离、剧情解析尚未实现。
