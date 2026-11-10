@@ -69,6 +69,97 @@ def assign_sents_to_events(sents: list[dict], events: list[dict]) -> list[int]:
     return out
 
 
+# ---------------------------------------------------------------- 语义配对腿
+SEM_SYS = ("你是动漫解说的分镜匹配师。给你解说稿的句子（按剧情块分组、块内按时间顺序）"
+           "和 AI 从原片识别出的事件表（含源片秒区间）。任务：给每个句子挑出它所描述的事件。")
+
+SEM_Q = """【解说句子】按块分组，格式 "块号:句子全局编号 文本"。
+{sent_lines}
+
+【事件表】格式 "事件全局编号 [t0-t1s] who: event (类型, 建议保留keep秒)"。
+{ev_lines}
+
+【块的有效事件范围】块号 → 事件全局编号区间（句子只能配该范围内的，且块内配对结果的事件编号必须不递减，允许重复）。
+{ranges}
+
+只输出 JSON 对象，不要解释：{{"句子全局编号": 事件全局编号, ...}}
+原则：优先按"句子说的内容 vs 事件内容"匹配；回忆/总结/评价性质的句子配它所指的事件，而非字面相邻的事件。"""
+
+
+def semantic_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
+                 events: list[dict]) -> dict[int, int] | None:
+    """语义腿：DeepSeek 一次性给全片 127 句配事件。失败/无效则返回 None（兜底两指针）。
+
+    结果缓存在 story_plan.json 的 sent_event_map，重跑对齐不再花 token。
+    """
+    import story_parse as SP
+    plan = SP.load_plan(proj_dir)
+    cached = plan.get("sent_event_map")
+    n_total = sum(len(v) for v in by_beat.values())
+    if isinstance(cached, dict) and len(cached) >= n_total:
+        try:
+            return {int(k): int(v) for k, v in cached.items()}
+        except (ValueError, TypeError):
+            pass
+
+    sent_lines, all_sents = [], []
+    for b in sorted(by_beat):
+        for s in by_beat[b]:
+            sent_lines.append(f"{b}:{s['i']} {s['text']}")
+            all_sents.append(s["i"])
+    ev_lines = [f"[{i}] {float(e.get('t0', 0)):.0f}-{float(e.get('t1', 0)):.0f}s "
+                f"{e.get('who', '')}: {e.get('event', '')} ({e.get('type', '')}, keep{e.get('keep')})"
+                for i, e in enumerate(events)]
+    ranges = {}
+    for bi, b in enumerate(sorted(by_beat)):
+        bl = blocks[bi] if bi < len(blocks) else None
+        if bl is None:
+            continue
+        ids = [i for i, e in enumerate(events)
+               if float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
+        if ids:
+            ranges[b] = f"{ids[0]}-{ids[-1]}"
+    if not all_sents or not ev_lines:
+        return None
+
+    q = SEM_Q.format(sent_lines="\n".join(sent_lines), ev_lines="\n".join(ev_lines),
+                     ranges="\n".join(f"  {b} → {r}" for b, r in ranges.items()))
+    try:
+        import narration as NR
+        r = NR.llm_chat(SEM_SYS, q, temperature=0.1, timeout=600)
+        txt = (r.get("text") or "").strip()
+        m = txt.find("{")
+        pairs = json.loads(txt[m:txt.rfind("}") + 1]) if m >= 0 else {}
+        out = {int(k): int(v) for k, v in pairs.items()}
+    except Exception as e:
+        print(f"[语义配对] 失败，退回比例法：{type(e).__name__} {str(e)[:120]}", flush=True)
+        return None
+
+    # 校验：覆盖全句、编号合法、块内不递减
+    valid = len(out) >= len(all_sents)
+    for bi, b in enumerate(sorted(by_beat)):
+        bl = blocks[bi] if bi < len(blocks) else None
+        ids = [i for i, e in enumerate(events)
+               if bl and float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
+        lo, hi = (ids[0], ids[-1]) if ids else (0, len(events) - 1)
+        prev = lo - 1
+        for s in by_beat[b]:
+            v = out.get(s["i"])
+            if v is None or not (lo <= v <= hi) or v < prev:
+                valid = False
+                break
+            prev = v
+        if not valid:
+            break
+    if not valid:
+        print("[语义配对] 返回不合法，退回比例法", flush=True)
+        return None
+    print(f"[语义配对] DeepSeek 配对 {len(out)} 句 ✓", flush=True)
+    plan["sent_event_map"] = {str(k): v for k, v in out.items()}
+    SP.save_plan(proj_dir, plan)
+    return out
+
+
 def cut_positions(window: tuple[float, float], k: int, shots: list[dict],
                   guard: tuple[float, float]) -> list[float]:
     """在源区间 window 内给 k 刀找起点：均匀铺 + 吸附镜头开头 + 不越 guard。"""
@@ -112,6 +203,7 @@ def align(proj_dir: Path) -> dict:
         dur = float(t.get("trim_dur") or t.get("tts_dur") or it["dur"])
         by_beat.setdefault(it["beat"], []).append({**it, "dur": dur})
     beats = sorted(by_beat)
+    sem_map = semantic_map(proj_dir, by_beat, blocks, events)
 
     # 保留旧 plan 里的 hook / hold_hl 窗（story 流程通常没有，EP05 式工程可能有）
     kept = [w for w in plan.get("windows", []) if w.get("tier") in ("hook", "hold_hl")]
@@ -164,12 +256,20 @@ def align(proj_dir: Path) -> dict:
         k_b = sum(ks)
         span_b = k_b * CUT
 
-        # 句 → 事件配对
+        # 句 → 事件配对：语义腿优先（DeepSeek 配的，全局编号），比例法兜底
         ev_in = [e for e in events
                  if float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
         if not ev_in:                      # 没事件表：整块当一个事件
             ev_in = [{"t0": bl["t0"], "t1": bl["t1"], "keep": bl["target"]}]
-        ev_idx = assign_sents_to_events(sents, ev_in)
+        if sem_map:
+            gids = [i for i, e in enumerate(events)
+                    if float(e.get("t0", 0)) < bl["t1"] and float(e.get("t1", 0)) > bl["t0"]]
+            ev_idx = []
+            for s in sents:
+                g = sem_map.get(s["i"])
+                ev_idx.append(gids.index(g) if g is not None and g in gids else 0)
+        else:
+            ev_idx = assign_sents_to_events(sents, ev_in)
 
         # 每句的画面窗口：事件区间，太窄则向相邻事件借
         src_windows = []
