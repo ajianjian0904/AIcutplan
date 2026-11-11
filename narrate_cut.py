@@ -39,7 +39,8 @@ NARR_Q = """【本块画面时间轴】（窗口按播放顺序；"成片秒"是
 【写作要求】
 1. 按窗口顺序写解说，输出 JSON 数组（不要解释）：
 [{{"ws": 起始窗口号, "we": 结束窗口号, "text": "解说句子"}}]
-2. 每个窗口必须被恰好一句覆盖；相邻窗口可合并给同一句（ws..we），但一句最多跨 3 个窗口。
+2. 相邻窗口可合并给同一句（ws..we），一句最多跨 6 个窗口（长叙述流）；
+   标注【原声留白·不写句】的窗口绝对不要写——那是留给原声的。
 3. **字数硬约束**：每句字数 = 窗口时长合计 × {rate} 字/秒 × 0.95，上下浮动 1 字。
    （窗口时长合计已标在每行末尾，预算也直接给出——贴着预算写，超了会被压语速，少了会留空）
 4. 解说内容必须来自这些窗口的画面/事件本身（画面演什么就讲什么，因果解释要落到画面上）；
@@ -84,6 +85,11 @@ def build_wins_lines(wins: list[dict], meta: list[dict], lo: int, hi: int,
                 dlg = r["dlg"][:36]
                 break
         span = w["new_end"] - w["new_start"]
+        if w.get("tier") == "hold_hl" or w.get("ost_mode") == "original":
+            lines.append(f"窗口{wi} | 成片 {w['new_start']:.1f}-{w['new_end']:.1f}s "
+                         f"({span:.2f}s) | 【原声留白·不写句】画面自己演：{desc}"
+                         + (f" | 台词: {dlg}" if dlg else ""))
+            continue
         line = (f"窗口{wi} | 成片 {w['new_start']:.1f}-{w['new_end']:.1f}s "
                 f"({span:.2f}s, 预算≈{int(span * 4.7)}字) | 画面: {desc}")
         if dlg:
@@ -121,7 +127,7 @@ def export_table(proj_dir: Path, rate: float) -> Path:
     out = ["# 会话内导演·旁白写作输入表", "",
            f"共 {len(wins)} 窗 / {len(blocks)} 块。TTS 语速 {rate} 字/秒，预算=窗口时长×4.7 已标注。",
            "每行：窗口号 | 成片秒(时长≈字数预算) | 画面 | 台词 | 深层 | 帧事实 | 关键词。",
-           "写作契约：每窗恰好一句覆盖；可合并相邻窗（≤3）；句长贴预算±1 字。", ""]
+           "写作契约：叙述流可一句跨多窗（≤6）；【原声留白】窗口不写句；句长贴预算±1 字。", ""]
     for bi in sorted(beat_wins):
         wids = beat_wins[bi]
         bl = blocks[bi] if bi < len(blocks) else {}
@@ -178,10 +184,13 @@ def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> d
                           "t0": round(wins[ws]["new_start"], 3), "dur": round(slot, 3),
                           "chars": len(text)})
             binding[sid] = [ws, we]
-        n_all = len(wins)
-        n_cov = len(covered)
-        print(f"[旁白后写·会话版] {len(items)} 句 · 窗口覆盖 {n_cov}/{n_all}", flush=True)
-        unc = [wi for wi in range(n_all) if wi not in covered]
+        n_all = sum(1 for w in wins if not (w.get("tier") == "hold_hl" or w.get("ost_mode") == "original"))
+        n_cov = sum(1 for wi in covered
+                    if not (wins[wi].get("tier") == "hold_hl" or wins[wi].get("ost_mode") == "original"))
+        print(f"[旁白后写·会话版] {len(items)} 句 · 旁白窗覆盖 {n_cov}/{n_all}", flush=True)
+        unc = [wi for wi in range(len(wins))
+               if wi not in covered
+               and not (wins[wi].get("tier") == "hold_hl" or wins[wi].get("ost_mode") == "original")]
         if unc:
             print(f"[旁白后写·会话版] 未覆盖窗口 {unc}", flush=True)
         _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all)
@@ -259,11 +268,16 @@ def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> d
         prev_text += " / ".join(s["text"] for s in items if s["beat"] == bi)
 
     # 未覆盖窗口兜底（开头块没有前句时）：报告
-    n_all = sum(len(v) for v in beat_wins.values())
-    n_cov = sum(1 for wi in range(n_all) if any(wi in rng for rng in binding.values()))
-    print(f"[旁白后写] {len(items)} 句 · 窗口覆盖 {n_cov}/{n_all}", flush=True)
+    def _is_raw(wi: int) -> bool:
+        w = wins[wi]
+        return w.get("tier") == "hold_hl" or w.get("ost_mode") == "original"
+    n_all = sum(1 for wi in range(len(wins)) if not _is_raw(wi))
+    n_cov = sum(1 for wi in range(len(wins))
+                if not _is_raw(wi) and any(wi in rng for rng in binding.values()))
+    print(f"[旁白后写] {len(items)} 句 · 旁白窗覆盖 {n_cov}/{n_all}", flush=True)
     if n_cov < n_all:
-        unc = [wi for wi in range(n_all) if not any(wi in rng for rng in binding.values())]
+        unc = [wi for wi in range(len(wins)) if not _is_raw(wi)
+               and not any(wi in rng for rng in binding.values())]
         print(f"[旁白后写] 未覆盖窗口 {unc[:10]}（留白，原声 −16dB 环境）", flush=True)
     _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all)
     return {"sents": len(items), "covered": f"{n_cov}/{n_all}"}
