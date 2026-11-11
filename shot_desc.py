@@ -23,47 +23,61 @@ sys.path.insert(0, str(ROOT))
 
 import story_parse as SP  # noqa: E402
 
-DESC_SYS = ("你是动漫镜头标注员。给你一个剧情块内的所有镜头中点截图（每张前标注镜头号与源片秒），"
+DESC_SYS = ("你是动漫镜头标注员。给你一个剧情块内的所有镜头截图（每张前标注镜头号与源片秒，"
+            "超过 6 秒的镜头会给前/中/尾三张，标注为 镜头号F/M/L）。"
             "为每个镜头写一句话内容描述，供后续按解说句子匹配画面。")
 
 DESC_Q = """只输出 JSON 数组，不要解释：
-[{"shot": 镜头号, "desc": "一句话说清谁在做什么/画面主体（15字内）", "obj": "关键对象，逗号分隔，没有则空"}]
+[{"shot": 镜头号, "desc": "一句话说清谁在做什么/画面主体（30字内）", "obj": "关键对象，逗号分隔，没有则空"}]
 镜头列表：
 {shots}
 
 规则：
 1. desc 必须具体到动作与对象（"雷恩挥剑砍向壮汉"），不要写"一个场景"。
-2. obj 填画面里可辨认的关键词（人名、外套、剑、公会牌、龙、登记表等）。
-3. 全部镜头都要有输出，顺序不限。"""
+2. 给了 F/M/L 三帧的镜头：desc 要概括整个镜头里发生的动作变化（如"少年站立案前，突然挥拳，对方被弹飞"），
+   以 M/L 帧显示的动作高潮为主。
+3. obj 填画面里可辨认的关键词（人名、外套、剑、公会牌、龙、登记表、发光、紫光等，动作关键词也填）。
+4. 全部镜头都要有输出，顺序不限。"""
 
 
-def probe_frames(video: Path, shots: list[dict], tmp: Path) -> dict[int, bytes]:
+def probe_frames(video: Path, shots: list[dict], tmp: Path) -> dict[tuple, bytes]:
+    """每镜抽帧：≤6s 抽中点 1 帧；>6s 抽 前/中/尾 3 帧（key: (镜号, 'F'|'M'|'L')）。"""
     tmp.mkdir(parents=True, exist_ok=True)
     out = {}
     for s in shots:
-        t = (s["a"] + s["b"]) / 2
-        f = tmp / f"shot_{s['i']:04d}.jpg"
-        if not f.exists():
-            subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(video),
-                            "-frames:v", "1", "-vf", "scale=240:-2", "-q:v", "6", "-y", str(f)],
-                           check=False)
-        if f.exists() and f.stat().st_size > 500:
-            out[s["i"]] = f.read_bytes()
+        dur = float(s["b"]) - float(s["a"])
+        marks = [("M", (s["a"] + s["b"]) / 2)]
+        if dur > 6:
+            marks = [("F", s["a"] + min(0.5, dur * 0.1)),
+                     ("M", (s["a"] + s["b"]) / 2),
+                     ("L", s["b"] - min(0.5, dur * 0.1))]
+        for tag, t in marks:
+            f = tmp / f"shot_{s['i']:04d}{tag}.jpg"
+            if not f.exists():
+                subprocess.run(["ffmpeg", "-v", "error", "-ss", f"{t:.2f}", "-i", str(video),
+                                "-frames:v", "1", "-vf", "scale=240:-2", "-q:v", "6", "-y", str(f)],
+                               check=False)
+            if f.exists() and f.stat().st_size > 500:
+                out[(s["i"], tag)] = f.read_bytes()
     return out
 
 
 def describe_block(video: Path, shots: list[dict], tmp: Path) -> list[dict]:
     frames = probe_frames(video, shots, tmp)
     shots_line = "\n".join(f"镜头{s['i']} [{s['a']:.1f}-{s['b']:.1f}s]" for s in shots
-                           if s["i"] in frames)
+                           if (s["i"], "M") in frames or (s["i"], "F") in frames)
     content = [{"type": "text", "text": DESC_Q.replace("{shots}", shots_line)}]
     for s in shots:
-        b = frames.get(s["i"])
-        if b is None:
+        if (s["i"], "M") not in frames and (s["i"], "F") not in frames:
             continue
-        b64 = base64.b64encode(b).decode()
-        content += [{"type": "text", "text": f"镜头{s['i']}："},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}}]
+        content.append({"type": "text", "text": f"镜头{s['i']}："})
+        for tag in ("F", "M", "L"):
+            b = frames.get((s["i"], tag))
+            if b is None:
+                continue
+            b64 = base64.b64encode(b).decode()
+            content.append({"type": "text", "text": f"  [{tag}]"})
+            content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
     body = {"model": "deepseek-flash", "stream": False, "max_tokens": 9000,
             "messages": [{"role": "system", "content": DESC_SYS},
                          {"role": "user", "content": content}]}

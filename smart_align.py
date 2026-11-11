@@ -19,6 +19,7 @@ cut.py / relayout / r6 / r7 / make_srt 的下游契约（cutplan.json / align.js
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -254,18 +255,24 @@ SHOT_Q = """【句子与候选镜头】格式 "句子编号 | 句子文本 | 事
 只输出 JSON：{{"句子编号": [镜头号, ...]}}（按贴合度排序，最多 3 个；没有贴合的就给空数组 []）
 原则：
 1. 句子提到具体对象/动作（外套挡攻击、收公会牌、拔剑）→ 挑画面里真的在演这个的镜头。
+   当前事件候选里没有时，优先挑 ※全片检索 标记的镜头。
 2. 句子是氛围/总结性的 → 挑该事件里情绪最强烈的镜头。
 3. 相邻句子尽量挑不同镜头，避免画面重复。"""
 
 
 def sentence_shot_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
-                      events: list[dict], shots: list[dict]) -> dict[int, list[int]]:
-    """内容级句→镜头匹配（一次文本调用）。失败/描述不足时返回 {}（退回时序取镜）。"""
+                      events: list[dict], shots: list[dict],
+                      scene_ts: dict[int, list[float]] | None = None) -> dict[int, list[int]]:
+    """内容级句→镜头匹配（一次文本调用）。失败/描述不足时返回 {}（退回时序取镜）。
+
+    候选池 = 事件区间内镜头 + 全片场景检索（scene_ts）映射回的镜头（标 ※）。
+    """
     import story_parse as SP
     plan = SP.load_plan(proj_dir)
     cached = plan.get("sent_shot_map")
     n_total = sum(len(v) for v in by_beat.values())
-    if isinstance(cached, dict) and len(cached) >= n_total:
+    # DeepSeek 只给有贴合镜头的句配镜，条数天然 < n_total；有缓存就直接用
+    if isinstance(cached, dict) and cached:
         try:
             return {int(k): [int(x) for x in v] for k, v in cached.items()}
         except Exception:
@@ -287,8 +294,18 @@ def sentence_shot_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
             e0 = float(e.get("t0", 0)) if e else 0.0
             e1 = float(e.get("t1", bl["t1"] if bl else 1e9)) if e else 1e9
             pool = [sh for sh in shots if e0 <= sh["a"] < e1]
-            valid_ids[s["i"]] = [sh["i"] for sh in pool]
+            pool_ids = {sh["i"] for sh in pool}
+            extra: list[dict] = []
+            for t in (scene_ts or {}).get(s["i"], []):
+                sh = _shot_at_t(shots, t)
+                if sh and sh["i"] not in pool_ids and all(sh["i"] != x["i"] for x in extra):
+                    extra.append(sh)
+            all_pool = pool + extra
+            valid_ids[s["i"]] = [sh["i"] for sh in all_pool]
             pl = " ; ".join(f"镜头{sh['i']}({sh.get('desc', '')})" for sh in pool) or "（无镜头）"
+            if extra:
+                pl += " ; ※全片检索: " + " ; ".join(
+                    f"镜头{sh['i']}@{sh['a']:.0f}s({sh.get('desc', '')})" for sh in extra)
             ev_s = f"[{g}] {e.get('who', '')}:{e.get('event', '')}" if e else "-"
             lines.append(f"{s['i']} | {s['text']} | {ev_s} | 候选: {pl}")
     if not lines:
@@ -313,6 +330,93 @@ def sentence_shot_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
     plan["sent_shot_map"] = {str(k): v for k, v in out.items()}
     SP.save_plan(proj_dir, plan)
     return out
+
+
+# ---------------------------------------------------------------- 全片场景检索
+SEMG_SYS = ("你是动漫解说的画面检索师。给你解说句子（按顺序）和全片每 2 秒的画面场景索引"
+            "（秒数|镜头语言|场景描述|台词）。任务：为句子找出全片里**真正演了这句话内容**的时间点。")
+
+SEMG_Q = """【解说句子】"编号 | 文本"
+{sent_lines}
+
+【全片场景索引】"秒数 | 镜头语言 | 场景描述 | 台词"
+{index}
+
+只输出 JSON，不要解释：{{"句子编号": [秒数, ...]}}
+原则：
+1. 句子提到具体对象/动作（外套挡攻击、紫光强化、点数球汇聚、挥剑、抱起狂奔）→ 给出演这个内容的
+   秒数（动作高潮帧优先），最多 3 个，按贴合度排序。
+2. 句子是纯评论/总结/氛围，或全片没有演这个内容的画面 → 给 []，不要硬凑。
+3. 场景描述和台词是判断依据；台词是日语原文，含义以描述里的中文转述为准。
+4. 秒数必须是索引里出现过的秒数。"""
+
+
+def scene_global_map(proj_dir: Path, by_beat: dict) -> dict[int, list[float]]:
+    """全片场景检索腿：714 窗 scene_desc 做索引，DeepSeek 一次文本调用按句子检索时间点。
+
+    缓存 story_plan.json 的 sent_scene_global（秒数）。scene_desc 重生成后须删除此键。
+    失败返回 {}（不影响主流程，只是没有跨块候选）。
+    """
+    import story_parse as SP
+    plan = SP.load_plan(proj_dir)
+    cached = plan.get("sent_scene_global")
+    n_total = sum(len(v) for v in by_beat.values())
+    # 命中本来就是稀疏的（只给有跨块画面的句），有任何缓存就直接用
+    if isinstance(cached, dict) and cached:
+        try:
+            return {int(k): [float(x) for x in v] for k, v in cached.items()}
+        except Exception:
+            pass
+
+    f = proj_dir / "json" / "scene_desc.json"
+    if not f.exists():
+        return {}
+    rows = [r for r in _load(f).get("rows", []) if r.get("desc")]
+    if not rows:
+        return {}
+    index = "\n".join(f"{float(r['t']):.0f} | {r.get('cam', '')} | {r['desc']} | {r.get('dlg', '')[:20]}"
+                      for r in rows)
+    sent_lines = []
+    for b in sorted(by_beat):
+        for s in by_beat[b]:
+            sent_lines.append(f"{s['i']} | {s['text']}")
+    q = SEMG_Q.format(sent_lines="\n".join(sent_lines), index=index)
+    try:
+        r = NR.llm_chat(SEMG_SYS, q, temperature=0, timeout=600)
+        txt = (r.get("text") or "").strip()
+        m = txt.find("{")
+        raw = json.loads(txt[m:txt.rfind("}") + 1]) if m >= 0 else {}
+        valid_ts = {round(float(r_["t"]), 1) for r_ in rows}
+        out = {}
+        for k, ts in raw.items():
+            i = int(k)
+            keep = []
+            for t in (ts if isinstance(ts, list) else []):
+                try:
+                    t = float(t)
+                except (TypeError, ValueError):
+                    continue
+                # 吸附到最近的索引秒
+                best = min(valid_ts, key=lambda z: abs(z - t)) if valid_ts else None
+                if best is not None and abs(best - t) <= 2.0:
+                    keep.append(best)
+            if keep:
+                out[i] = keep[:3]
+        plan["sent_scene_global"] = {str(k): v for k, v in out.items()}
+        SP.save_plan(proj_dir, plan)
+        n_hit = len(out)
+        print(f"[全片检索] {n_hit}/{n_total} 句命中跨块画面", flush=True)
+        return out
+    except Exception as e:
+        print(f"[全片检索] 失败（不影响主流程）：{type(e).__name__} {str(e)[:120]}", flush=True)
+        return {}
+
+
+def _shot_at_t(shots: list[dict], t: float) -> dict | None:
+    for sh in shots:
+        if sh["a"] <= t < sh["b"]:
+            return sh
+    return min(shots, key=lambda z: min(abs(z["a"] - t), abs(z["b"] - t)), default=None)
 
 
 def _clamp_shot(sh: dict, lo: float = 0.8, hi: float = 3.2) -> float:
@@ -350,7 +454,8 @@ def align(proj_dir: Path) -> dict:
     beats = sorted(by_beat)
 
     sem_map = semantic_map(proj_dir, by_beat, blocks, events)
-    shot_map = sentence_shot_map(proj_dir, by_beat, blocks, events, shots)
+    scene_ts = scene_global_map(proj_dir, by_beat)
+    shot_map = sentence_shot_map(proj_dir, by_beat, blocks, events, shots, scene_ts)
 
     shot_by_id = {s["i"]: s for s in shots}
     head_guard = shots[0]["b"]            # 片头（黑屏标题卡+制作名单）
@@ -430,13 +535,32 @@ def align(proj_dir: Path) -> dict:
                     got += d_want
                     picks.append(sh["i"])
 
-                # 1) 内容匹配的镜头优先（按事件内时序）
-                pref = []
+                # 1) 内容匹配的镜头优先：全片检索命中（句子的具体内容）> 事件区间内 > 其余
+                gids = set()
+                for t in scene_ts.get(s["i"], []):
+                    sh_t = _shot_at_t(shots, t)
+                    if sh_t:
+                        gids.add(sh_t["i"])
+                pref_g, pref_in, pref_out = [], [], []
                 for sid in shot_map.get(s["i"], []):
                     sh = shot_by_id.get(sid)
-                    if sh and e0 - 1.0 <= sh["a"] < e1 + 1.0:
-                        pref.append(sh)
-                for sh in sorted(pref, key=lambda z: z["a"]):
+                    if not sh:
+                        continue
+                    if sid in gids:
+                        pref_g.append(sh)
+                    elif e0 - 1.0 <= sh["a"] < e1 + 1.0:
+                        pref_in.append(sh)
+                    else:
+                        pref_out.append(sh)
+                if os.environ.get("ALIGN_DEBUG"):
+                    print(f"[DBG] 句{s['i']} need={need:.2f} e=[{e0:.0f},{e1:.0f}] "
+                          f"g={[z['i'] for z in pref_g]} in={[z['i'] for z in pref_in]} "
+                          f"out={[z['i'] for z in pref_out]}", flush=True)
+                for sh in pref_g:                       # 检索命中：按贴合度排序，不按时间轴
+                    try_take(sh)
+                for sh in sorted(pref_in, key=lambda z: z["a"]):
+                    try_take(sh)
+                for sh in pref_out:
                     try_take(sh)
                 # 2) 事件区间内按时间序补足
                 if got < need:
