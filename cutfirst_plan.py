@@ -46,6 +46,17 @@ def _weight(e: dict, causal: dict, gi: int) -> float:
     return w
 
 
+def _reason(e: dict, causal: dict, gi: int) -> str:
+    """窗口保留理由（clip_plan 契约：旁白写作与人工抽查的依据）。"""
+    c = causal.get(str(gi)) or {}
+    func = c.get("func") or e.get("type", "")
+    ev = e.get("event", "")[:30]
+    link = ""
+    if c.get("cause"):
+        link = f"（承接事件{c['cause'][0]}）"
+    return f"{func}节点{link}：{ev}"
+
+
 def align_plan(proj_dir: Path) -> dict:
     d = proj_dir / "json"
     sp = _load(d / "story_plan.json")
@@ -63,12 +74,18 @@ def align_plan(proj_dir: Path) -> dict:
 
     def emit(src_a: float, dur: float, gi: int, bi: int) -> None:
         nonlocal cursor
+        e = events[gi] if gi < len(events) else {}
+        c = causal.get(str(gi)) or {}
+        # 声音策略：钩子/爆发/反转的高潮段保留原声（mixed），其余旁白覆盖
+        func = c.get("func") or e.get("type", "")
+        ost_mode = "mixed" if func in ("爆发", "钩子") else "narration"
         new_wins.append({"src_start": round(src_a, 3), "src_end": round(src_a + dur, 3),
                          "tier": "line", "label": blocks[bi]["label"] if bi < len(blocks) else "",
                          "lines": [], "dur": round(dur, 3),
                          "new_start": round(cursor, 3), "new_end": round(cursor + dur, 3),
-                         "sent_ids": []})
-        meta.append({"ev": gi, "beat": bi})
+                         "sent_ids": [], "ost_mode": ost_mode,
+                         "reason": _reason(e, causal, gi)})
+        meta.append({"ev": gi, "beat": bi, "ost_mode": ost_mode})
         cursor += dur
 
     beat_span = {}

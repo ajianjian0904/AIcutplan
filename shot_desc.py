@@ -25,19 +25,26 @@ import story_parse as SP  # noqa: E402
 
 DESC_SYS = ("你是动漫镜头标注员。给你一个剧情块内的所有镜头截图（每张前标注镜头号与源片秒，"
             "超过 6 秒的镜头会给前/中/尾三张，标注为 镜头号F/M/L）。"
-            "为每个镜头写一句话内容描述，供后续按解说句子匹配画面。")
+            "为每个镜头输出「叙事证据包」：客观描述 + 深层分析 + 帧级事实，供解说匹配画面。")
 
 DESC_Q = """只输出 JSON 数组，不要解释：
-[{"shot": 镜头号, "desc": "一句话说清谁在做什么/画面主体（30字内）", "obj": "关键对象，逗号分隔，没有则空"}]
+[{"shot": 镜头号, "desc": "客观描述", "obj": "关键对象，逗号分隔",
+  "depth": "深层分析", "facts": ["F:…", "M:…", "L:…"]}]
+
+字段要求：
+1. desc（40字内）：谁在做什么/画面主体，具体到动作与对象（"雷恩挥剑砍向壮汉"），不要写"一个场景"。
+2. obj：画面里可辨认的关键词（人名、外套、剑、公会牌、龙、发光、紫光等）。
+3. depth（40字内）：深层叙事分析——情绪基调、角色关系张力、该镜头的叙事功能
+   （建立威胁/情绪铺垫/冲突升级/爽点释放/因果揭示等）。这是给"解释因果与情绪的解说句"匹配用的，
+   比客观描述更重要，必须具体（如"压抑对峙，强势方羞辱弱势方，冲突升级前夜"）。
+4. facts：帧级细节事实，按帧标注（F=前/M=中/L=尾；单帧镜头只写 M），每条 15 字内，
+   记录表情/姿态/动作的动态变化（"M:眉头紧锁" "L:嘴角上扬露轻蔑"）。
+5. 给了 F/M/L 三帧的镜头：desc 概括整个镜头的动作变化，以 M/L 帧的动作高潮为主。
+6. 全部镜头都要有输出，顺序不限。
+
 镜头列表：
 {shots}
-
-规则：
-1. desc 必须具体到动作与对象（"雷恩挥剑砍向壮汉"），不要写"一个场景"。
-2. 给了 F/M/L 三帧的镜头：desc 要概括整个镜头里发生的动作变化（如"少年站立案前，突然挥拳，对方被弹飞"），
-   以 M/L 帧显示的动作高潮为主。
-3. obj 填画面里可辨认的关键词（人名、外套、剑、公会牌、龙、登记表、发光、紫光等，动作关键词也填）。
-4. 全部镜头都要有输出，顺序不限。"""
+"""
 
 
 def probe_frames(video: Path, shots: list[dict], tmp: Path) -> dict[tuple, bytes]:
@@ -78,7 +85,7 @@ def describe_block(video: Path, shots: list[dict], tmp: Path) -> list[dict]:
             b64 = base64.b64encode(b).decode()
             content.append({"type": "text", "text": f"  [{tag}]"})
             content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64}"}})
-    body = {"model": "deepseek-flash", "stream": False, "max_tokens": 9000,
+    body = {"model": "deepseek-flash", "stream": False, "max_tokens": 12000,
             "messages": [{"role": "system", "content": DESC_SYS},
                          {"role": "user", "content": content}]}
     req = urllib.request.Request(
@@ -140,7 +147,20 @@ def main() -> int:
         for s in inb:
             g = byid.get(s["i"], {})
             rows.append({"i": s["i"], "a": s["a"], "b": s["b"],
-                         "desc": str(g.get("desc", ""))[:40], "obj": str(g.get("obj", ""))[:40]})
+                         "desc": str(g.get("desc", ""))[:40],
+                         "obj": str(g.get("obj", ""))[:40],
+                         "depth": str(g.get("depth", ""))[:60],
+                         "facts": " | ".join(str(x) for x in (g.get("facts") or [])[:3])[:160]})
+    # 台词锚点：ja-segments 与镜头窗口时间重叠的台词（确定性附加，不走 VLM）
+    try:
+        segs = json.loads((proj_dir / "json" / "ja-segments.json").read_text(encoding="utf-8")).get("segments", [])
+    except Exception:
+        segs = []
+    if segs:
+        for r in rows:
+            hits = [s["text"] for s in segs
+                    if float(s.get("start", 0)) < r["b"] and float(s.get("end", 0)) > r["a"] and s.get("text")]
+            r["dlg"] = " / ".join(t[:24] for t in hits[:2])
     cache.write_text(json.dumps({"rows": rows, "updated": __import__("datetime").datetime.now().isoformat()},
                                 ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"[镜头描述] {len(rows)} 镜 → {cache}", flush=True)
