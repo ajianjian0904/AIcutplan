@@ -55,8 +55,21 @@ def _shot_at(shots: list[dict], t: float) -> dict | None:
     return None
 
 
+def _fmt_facts(facts) -> str:
+    out = []
+    for f in facts or []:
+        if isinstance(f, dict):
+            t = f.get("t")
+            out.append(f"{t}s:{f.get('fact', '')}" if t is not None else str(f.get("fact", "")))
+        else:
+            out.append(str(f))
+    return " / ".join(out[:4])
+
+
 def build_wins_lines(wins: list[dict], meta: list[dict], lo: int, hi: int,
-                     shots: list[dict], scene: list[dict], events: list[dict]) -> list[str]:
+                     shots: list[dict], scene: list[dict], events: list[dict],
+                     evidence: bool = True) -> list[str]:
+    """窗口写作输入行。evidence=True 时附带镜头证据包（depth/facts/obj）。"""
     lines = []
     for wi in range(lo, hi + 1):
         w = wins[wi]
@@ -71,10 +84,63 @@ def build_wins_lines(wins: list[dict], meta: list[dict], lo: int, hi: int,
                 dlg = r["dlg"][:36]
                 break
         span = w["new_end"] - w["new_start"]
-        lines.append(f"窗口{wi} | 成片 {w['new_start']:.1f}-{w['new_end']:.1f}s "
-                     f"({span:.2f}s, 预算≈{int(span * 4.7)}字) | 画面: {desc}"
-                     + (f" | 台词: {dlg}" if dlg else ""))
+        line = (f"窗口{wi} | 成片 {w['new_start']:.1f}-{w['new_end']:.1f}s "
+                f"({span:.2f}s, 预算≈{int(span * 4.7)}字) | 画面: {desc}")
+        if dlg:
+            line += f" | 台词: {dlg}"
+        if evidence and sh:
+            depth = sh.get("depth", "")
+            if depth:
+                line += f" | 深层: {depth}"
+            ff = _fmt_facts(sh.get("facts"))
+            if ff:
+                line += f" | 帧事实: {ff}"
+            obj = sh.get("obj", "")
+            if obj:
+                line += f" | 关键词: {obj}"
+        lines.append(line)
     return lines
+
+
+def export_table(proj_dir: Path, rate: float) -> Path:
+    """导出会话内导演写作所需的完整窗口输入表（含证据包）。"""
+    d = proj_dir / "json"
+    plan = _load(d / "cutplan.json")
+    meta = _load(d / "cutplan_meta.json")
+    wins, wmeta = plan["windows"], meta["meta"]
+    sp = _load(d / "story_plan.json")
+    events = sp.get("events") or []
+    causal = sp.get("causal") or {}
+    blocks = [b for b in (sp.get("blocks") or []) if b["type"] != "收录" and b["target"] > 0]
+    shots = _load_shots(proj_dir)
+    scene = (_load(d / "scene_desc.json").get("rows", []) if (d / "scene_desc.json").exists() else [])
+    beat_wins: dict[int, list[int]] = {}
+    for wi, m in enumerate(wmeta):
+        beat_wins.setdefault(m["beat"], []).append(wi)
+
+    out = ["# 会话内导演·旁白写作输入表", "",
+           f"共 {len(wins)} 窗 / {len(blocks)} 块。TTS 语速 {rate} 字/秒，预算=窗口时长×4.7 已标注。",
+           "每行：窗口号 | 成片秒(时长≈字数预算) | 画面 | 台词 | 深层 | 帧事实 | 关键词。",
+           "写作契约：每窗恰好一句覆盖；可合并相邻窗（≤3）；句长贴预算±1 字。", ""]
+    for bi in sorted(beat_wins):
+        wids = beat_wins[bi]
+        bl = blocks[bi] if bi < len(blocks) else {}
+        cs = []
+        for wi in wids:
+            c = causal.get(str(wmeta[wi]["ev"])) or {}
+            if c.get("func") or c.get("cause") or c.get("result"):
+                cs.append(f"事件{wmeta[wi]['ev']}[{c.get('func', '-')}]: "
+                          f"起因←{c.get('cause', [])} 结果→{c.get('result', [])}")
+        out.append(f"## 块{bi} {bl.get('label', '')}（{bl.get('type', '')}）")
+        if cs:
+            out.append(f"因果：{'；'.join(cs[:8])}")
+        out.extend(build_wins_lines(wins, wmeta, wids[0], wids[-1],
+                                    shots, scene, events, evidence=True))
+        out.append("")
+    path = proj_dir / "window_table.md"
+    path.write_text("\n".join(out), encoding="utf-8")
+    print(f"[导出] 写作输入表 -> {path}（{len(wins)} 窗 / {len(blocks)} 块）")
+    return path
 
 
 def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> dict:
@@ -241,10 +307,15 @@ def main() -> int:
     ap.add_argument("--rate", type=float, default=4.95, help="TTS 语速标定 字/秒")
     ap.add_argument("--sentences", default=None,
                     help="会话内已写好的句子 JSON 路径（[{'ws','we','text'}...]），跳过 LLM 写作")
+    ap.add_argument("--export", action="store_true",
+                    help="只导出会话内导演写作输入表（window_table.md），不写作")
     a = ap.parse_args()
     proj_dir = Path(a.project).expanduser().resolve().parent
     if a.sentences:
         proj_dir = Path(a.sentences).resolve().parent
+    if a.export:
+        export_table(proj_dir, a.rate)
+        return 0
     r = narrate(proj_dir, a.rate, sentences_path=a.sentences)
     print(f"[旁白后写] 完成 {r['sents']} 句，覆盖 {r['covered']} → narration.json + align.json")
     print("下一步：r5_tts.py → elastic_fit.py → r6_mix.py → r7_mux.py")

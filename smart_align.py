@@ -56,6 +56,8 @@ def shots_of(proj_dir: Path) -> list[dict]:
             if r:
                 sh["desc"] = r.get("desc", "")
                 sh["obj"] = r.get("obj", "")
+                sh["depth"] = r.get("depth", "")
+                sh["facts"] = r.get("facts") or []
     return shots
 
 
