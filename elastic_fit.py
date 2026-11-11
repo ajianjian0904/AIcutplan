@@ -44,6 +44,22 @@ def ffprobe_dur(ffprobe: str, p: Path) -> float:
         return 0.0
 
 
+def trimmed_speech_dur(ffmpeg: str, p: Path) -> float:
+    """解码 + 按振幅裁剪后的净语音时长（edge-tts 首尾静音随句长浮动，常数估算会失真）。"""
+    argv = [ffmpeg, "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", "8000",
+            "-f", "s16le", "-"]
+    raw = subprocess.run(argv, capture_output=True, timeout=120).stdout
+    import array
+    a = array.array("h")
+    a.frombytes(raw[: len(raw) // 2 * 2])
+    thr = int(0.008 * 32768)
+    idx = [k for k, v in enumerate(a) if abs(v) > thr]
+    if not idx:
+        return 0.0
+    sr = 8000
+    return (idx[-1] - idx[0]) / sr
+
+
 def atempo_file(ffmpeg: str, src: Path, tempo: float, dst: Path) -> None:
     subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(src),
                     "-af", f"atempo={tempo:.4f}", "-c:a", "libmp3lame", "-q:a", "4", str(dst)],
@@ -84,11 +100,11 @@ def main() -> int:
         if lo is None:
             continue
         slot = wins[hi]["new_end"] - wins[lo]["new_start"] + 0.15   # 少量呼吸宽限
-        speech = r["tts_dur"] - SILENCE
+        mp3 = ctx.p("tts", f"{i:03d}.mp3")
+        speech = trimmed_speech_dur(ff, mp3) if mp3.exists() else max(0.0, r["tts_dur"] - SILENCE)
         ratio = speech / slot if slot > 0.1 else 1.0
         row = {"i": i, "slot": round(slot, 2), "speech": round(speech, 2),
                "ratio": round(ratio, 2), "action": "ok"}
-        mp3 = ctx.p("tts", f"{i:03d}.mp3")
 
         def _tmp() -> Path:
             fd, name = tempfile.mkstemp(suffix=".mp3", dir=str(mp3.parent))

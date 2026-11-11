@@ -77,7 +77,7 @@ def build_wins_lines(wins: list[dict], meta: list[dict], lo: int, hi: int,
     return lines
 
 
-def narrate(proj_dir: Path, rate: float) -> dict:
+def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> dict:
     d = proj_dir / "json"
     plan = _load(d / "cutplan.json")
     meta = _load(d / "cutplan_meta.json")
@@ -89,11 +89,37 @@ def narrate(proj_dir: Path, rate: float) -> dict:
     blocks = [b for b in (sp.get("blocks") or []) if b["type"] != "收录" and b["target"] > 0]
     shots = _load_shots(proj_dir)
     scene = (_load(d / "scene_desc.json").get("rows", []) if (d / "scene_desc.json").exists() else [])
-
-    # 窗口号按块分组（窗口连续）
     beat_wins: dict[int, list[int]] = {}
     for wi, m in enumerate(wmeta):
         beat_wins.setdefault(m["beat"], []).append(wi)
+
+    # 会话内写作模式：句子已备好，只做校验与落盘
+    if sentences_path:
+        raw = _load(Path(sentences_path))
+        sents_all = raw if isinstance(raw, list) else raw.get("sents", [])
+        items, binding = [], {}
+        covered: set[int] = set()
+        for s in sents_all:
+            ws, we = int(s["ws"]), int(s["we"])
+            text = str(s.get("text", "")).strip()
+            if not text or we < ws:
+                continue
+            for x in range(ws, we + 1):
+                covered.add(x)
+            slot = wins[we]["new_end"] - wins[ws]["new_start"]
+            sid = len(items)
+            items.append({"i": sid, "text": text, "beat": wmeta[ws]["beat"],
+                          "t0": round(wins[ws]["new_start"], 3), "dur": round(slot, 3),
+                          "chars": len(text)})
+            binding[sid] = [ws, we]
+        n_all = len(wins)
+        n_cov = len(covered)
+        print(f"[旁白后写·会话版] {len(items)} 句 · 窗口覆盖 {n_cov}/{n_all}", flush=True)
+        unc = [wi for wi in range(n_all) if wi not in covered]
+        if unc:
+            print(f"[旁白后写·会话版] 未覆盖窗口 {unc}", flush=True)
+        _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all)
+        return {"sents": len(items), "covered": f"{n_cov}/{n_all}"}
 
     items: list[dict] = []
     binding: dict[int, list[int]] = {}
@@ -173,8 +199,13 @@ def narrate(proj_dir: Path, rate: float) -> dict:
     if n_cov < n_all:
         unc = [wi for wi in range(n_all) if not any(wi in rng for rng in binding.values())]
         print(f"[旁白后写] 未覆盖窗口 {unc[:10]}（留白，原声 −16dB 环境）", flush=True)
+    _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all)
+    return {"sents": len(items), "covered": f"{n_cov}/{n_all}"}
 
-    # 写 narration.json + align.json（下游 r5/r6/r7/verify 兼容）
+
+def _write_outputs(d: Path, items: list[dict], binding: dict[int, list[int]],
+                   beat_span: dict, beat_wins: dict, n_cov: int, n_all: int) -> None:
+    """写 narration.json（含 r7 需要的 stats）+ align.json（含 sent_win_idx）。"""
     import statistics as _st
     lens = [len(it["text"]) for it in items]
     narr_out = {"items": items,
@@ -185,7 +216,7 @@ def narrate(proj_dir: Path, rate: float) -> dict:
     (d / "narration.json").write_text(json.dumps(narr_out, ensure_ascii=False, indent=1),
                                       encoding="utf-8")
     sent_span = [[it["i"], it["t0"], round(it["t0"] + it["dur"], 3), it["dur"]] for it in items]
-    align_out = {"windows": wins,
+    align_out = {"windows": _load(d / "cutplan.json")["windows"],
                  "align": [{"kind": "line", "sent": it["i"], "text": it["text"],
                             "src": None, "new_start": it["t0"], "dur": it["dur"],
                             "sents": [it["i"]]} for it in items],
@@ -197,7 +228,6 @@ def narrate(proj_dir: Path, rate: float) -> dict:
                  "mode": "cut-first"}
     (d / "align.json").write_text(json.dumps(align_out, ensure_ascii=False, indent=1),
                                   encoding="utf-8")
-    return {"sents": len(items), "covered": f"{n_cov}/{n_all}"}
 
 
 def _load_shots(proj_dir: Path) -> list[dict]:
@@ -209,9 +239,13 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
     ap.add_argument("--rate", type=float, default=4.95, help="TTS 语速标定 字/秒")
+    ap.add_argument("--sentences", default=None,
+                    help="会话内已写好的句子 JSON 路径（[{'ws','we','text'}...]），跳过 LLM 写作")
     a = ap.parse_args()
     proj_dir = Path(a.project).expanduser().resolve().parent
-    r = narrate(proj_dir, a.rate)
+    if a.sentences:
+        proj_dir = Path(a.sentences).resolve().parent
+    r = narrate(proj_dir, a.rate, sentences_path=a.sentences)
     print(f"[旁白后写] 完成 {r['sents']} 句，覆盖 {r['covered']} → narration.json + align.json")
     print("下一步：r5_tts.py → elastic_fit.py → r6_mix.py → r7_mux.py")
     return 0
