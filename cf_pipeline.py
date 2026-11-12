@@ -100,6 +100,7 @@ def main() -> int:
     ap.add_argument("--qc-apply", default=None,
                     help="质检闭环：按改好的句子稿局部重跑失配句（qc_loop --apply）")
     ap.add_argument("--dry-run", action="store_true", help="只打印闭环命令，不执行")
+    ap.add_argument("--qc-force", action="store_true", help="闭环文本未变也强制重合成")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -111,6 +112,8 @@ def main() -> int:
                "--apply", str(Path(a.qc_apply).expanduser().resolve())]
         if a.dry_run:
             cmd.append("--dry-run")
+        if a.qc_force:
+            cmd.append("--force")
         return 0 if run(cmd) else 2
 
     # 0) 因果图谱（缓存则跳过）

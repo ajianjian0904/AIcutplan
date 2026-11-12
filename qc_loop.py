@@ -17,6 +17,7 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -42,6 +43,8 @@ def main() -> int:
     ap.add_argument("--list", action="store_true", help="打印失配句重写清单")
     ap.add_argument("--apply", default=None, help="会话内改好的句子 JSON")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="文本未变也重跑（用于「文本已改但音频未重合成」的补跑）")
     ap.add_argument("--python", default=PY, help="渲染/规划解释器")
     ap.add_argument("--tts-python", default=TTS_PY, help="TTS 解释器（需 edge_tts）")
     a = ap.parse_args()
@@ -72,9 +75,12 @@ def main() -> int:
            for x in json.loads((d / "narration.json").read_text(encoding="utf-8"))["items"]}
     ids = [r["i"] for r in rewrite]
     changed = [i for i in ids if i in new and new.get(i) != old.get(i)]
-    if not changed:
-        print("失配句在新句子稿里一个字都没改 —— 空跑没意义，先改词再 --apply")
+    if not changed and not a.force:
+        print("失配句在新句子稿里一个字都没改 —— 空跑没意义，先改词再 --apply（或 --force 强制重合成）")
         return 3
+    if a.force and not changed:
+        changed = ids
+        print("[闭环] --force：文本未变，强制重合成并重跑")
     print(f"[闭环] 待重跑 {len(changed)} 句: {changed}")
     for i in changed:
         print(f"  句{i}: {old.get(i)} → {new.get(i)}")
@@ -85,7 +91,8 @@ def main() -> int:
           "--sentences", str(sp)], None),
         ([a.tts_python, str(proj_dir / "r5_tts.py"), "--project", str(pj),
           "--only", only], proj_dir),
-        ([a.python, str(ROOT / "elastic_fit.py"), "--project", str(pj)], None),
+        # elastic_fit 内部会调 edge_tts 重合成超槽句，必须跟 r5 用同一个解释器
+        ([a.tts_python, str(ROOT / "elastic_fit.py"), "--project", str(pj)], None),
         ([a.python, str(proj_dir / "r6_mix.py"), "--project", str(pj)], proj_dir),
         ([a.python, str(proj_dir / "r7_mux.py"), "--project", str(pj)], proj_dir),
     ]
@@ -93,10 +100,21 @@ def main() -> int:
         for cmd, cwd in steps:
             print("  $ " + " ".join(str(c) for c in cmd) + (f"   (cwd={cwd})" if cwd else ""))
         return 0
-    for cmd, cwd in steps:
+    t_start = time.time() - 2
+    for k, (cmd, cwd) in enumerate(steps):
         if not run(cmd, cwd):
             print(f"[闭环] 中断于: {cmd[1]}")
             return 2
+        if k == 1:  # r5 之后立刻校验音频真的换了，防止「文本新词 / 成片旧音频」
+            stale = []
+            for i in changed:
+                f = proj_dir / "tts" / f"{i:03d}.mp3"
+                if not f.exists() or f.stat().st_mtime < t_start:
+                    stale.append(i)
+            if stale:
+                print(f"[闭环] 音频未更新（句子 {stale}），中止后续混音 —— 检查 r5_tts 缓存/删除钩子")
+                return 4
+            print(f"[闭环] 音频校验通过：{len(changed)} 句 mp3 均为本次重合成")
     print("[闭环] 局部重跑完成 → 再跑 qc_visual.py --plan / --merge 复核失配是否消除")
     return 0
 

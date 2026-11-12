@@ -170,6 +170,30 @@ templates.json       旁白提示词模板
 tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
 ```
 
+## cut-first：会话内质检闭环（P0-1）
+
+渲染后把「人工看片发现音画错位」变成可重复流程，全程零 DeepSeek API：
+
+```bash
+PY=D:/Python312/python.exe
+PJ=<工程目录>/project.json
+
+# 1) 逐句读图批次：每 6 句一张 2×3 宫格图 + plan_XX.json
+$PY qc_visual.py --project $PJ --plan 6
+#    会话内按 .qcframes/session/grid_XX.jpg 判定，写 verdict_XX.json（{i,match,why}）
+# 2) 合并 → json/qc_visual.json + json/qc_rewrite.json
+$PY qc_visual.py --project $PJ --merge
+# 3) 失配句每句抽 3 帧复核，排除「抽帧点落在黑帧/空镜」的假阳性
+$PY qc_visual.py --project $PJ --probe
+# 4) 改好句子稿后局部重跑：只重合成改过的句子，不整条重来
+$PY cf_pipeline.py --project $PJ --qc-apply <sentences.json>
+```
+
+- 抽帧取**句子首窗中点**（一句可跨 6 窗，整句中点会落到后半段画面）；`--plan` 强制重抽并按成片 mtime 失效缓存，避免旧版帧冒充当前成片；全黑帧自动往后挪 0.35s 重抽。
+- `qc_loop` 校验失配句确实改词，并在 r5 之后检查 mp3 是否真的被重写（防止「句子稿新词 / 成片旧音频」），不通过即中止后续混音。
+- 一键全链带质检：`cf_pipeline.py --project $PJ --sentences <稿> --qc`；`--dry-run` 只打印命令，`--qc-force` 在文本未变时也强制重合成。
+- **换窗口不走闭环**：改 `cutplan.json` 的 `src_start/src_end` 后需重跑 `cut.py → narrate_cut --sentences → r6_mix → r7_mux`（画面变了但音频不变，无需 r5）。
+
 ## 阶段门禁
 
 - 旁白有**未定稿草稿**时，锚点台与逐句台的写回按钮被锁（后端 `/api/save` 直接返回 409），避免白做。
