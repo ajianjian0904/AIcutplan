@@ -16,6 +16,7 @@ studio_state.json.*
 # 可能包含密钥的本地配置（config/ 下的模板与校准要入库，只有本机 LLM 配置忽略）
 llm_config.json
 config/llm_config.json
+config/library.json
 .env
 
 # 日志与系统文件

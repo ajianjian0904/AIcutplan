@@ -49,7 +49,7 @@ python -m aicutplan serve                                           # web 台
 
 ```
 aicutplan/                    Python 包（全部代码按层入包，根目录零 .py）
-  paths io media cache contracts subtitles planning evidence
+  paths io media cache contracts subtitles planning evidence workspace
                               L0 基础层：路径 / 原子写 / ffmpeg / 指纹 / 契约 / 领域纯函数
   cli.py __main__.py          L2 统一 CLI 门面（python -m aicutplan <cmd>）
   shared/                     L1 共享库：narration story_parse smart_align
@@ -96,6 +96,54 @@ pyproject.toml requirements.txt .gitignore CHANGELOG.md
 ```bash
 python -m aicutplan check --project <pj>
 ```
+
+---
+
+## 作品库与版本（多动漫 / 多集）
+
+**目录约定**（库根默认 `<仓库同级>/漫剪作品库`，可用 `AICUTPLAN_LIBRARY` 或
+`config/library.json` 覆盖）：
+
+```
+漫剪作品库/
+└── 被驱逐的加强师/                 # 动漫名（文件夹名，series.json 存别名/备注）
+    ├── series.json
+    └── EP01/                       # 一集 = 一个工程（project.json 在这里）
+        ├── project.json  json/  out/  tts/
+        └── runs/
+            ├── r001_20261112-2341_v3.5/{manifest.json, final.mp4, narration.json, ...}
+            └── latest.json         # 最新归档指针（含成片指纹）
+```
+
+**每次生成自动归档**：`aicutplan run` 成功后把成片与关键 JSON 快照进
+`runs/<run_id>/`，写 `manifest.json`（产物指纹 + 输入句子稿 + 来源工程）并更新
+`latest.json`。同盘用**硬链接**，后续 ffmpeg 覆盖 `out/` 只换 inode，快照不可变；
+跨盘自动退化为复制。不想归档加 `--no-snapshot`，自定义标签用 `--label v36`。
+
+```bash
+# 作品库
+python -m aicutplan lib init 被驱逐的加强师 --alias 追放チート付与魔術師
+python -m aicutplan lib list                     # 动漫 / 集 / 最新归档 / 告警
+python -m aicutplan lib migrate --project <pj> --series <名> --episode EP01 [--move]
+
+# 版本
+python -m aicutplan runs snapshot --project <pj> --label v36 --sentences <稿>
+python -m aicutplan runs list --project <pj>
+python -m aicutplan runs latest --project <pj>   # 校验成片指纹后打印指针
+python -m aicutplan runs verify --project <pj>   # 校验该 run 全部产物
+```
+
+**如何避免「引用了旧产物」**：
+
+1. 成片只认 `latest.json` 指向的 run —— `runs latest` 会校验成片指纹，被替换/缺失
+   直接报错，**不静默回退**；
+2. 每次 `run` 开始打印「污染检查」：归档后未归档的改动、与 tts-result 指纹不符的
+   旧音频、早于成片的旧质检帧（只告警不阻断）；
+3. TTS 音频带内容指纹（`mp3_sig`），r5 合成时写入，扫描按指纹核对而不是 mtime；
+4. 多集并行：不同集是独立目录，各自 `cf_pipeline` 互不干扰；同集同时只跑一个渲染。
+
+当前 EP01 已迁入：`E:/workbuddy/漫剪作品库/被驱逐的加强师/EP01`（迁移会重写
+`project.json` 的 `workdir`；web 台工程指向已同步）。
 
 ---
 

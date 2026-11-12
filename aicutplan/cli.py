@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -39,7 +40,133 @@ SCRIPTS = {
 }
 
 # 这些子命令由本包直接实现，不启子进程
-DIRECT = ("check", "lint", "version")
+DIRECT = ("check", "lint", "version", "lib", "runs")
+
+
+def _library(argv: list[str]) -> int:
+    """作品库：路径 / 列表 / 建系列 / 迁移工程。"""
+    from . import workspace as WS
+
+    ap = argparse.ArgumentParser(prog="aicutplan lib", description="作品库（动漫文件夹 / 集工程）")
+    sub = ap.add_subparsers(dest="sub", required=True)
+    p = sub.add_parser("path", help="打印作品库根目录")
+    p.add_argument("--library")
+    p = sub.add_parser("list", help="列出动漫 / 集 / 最新归档")
+    p.add_argument("--library")
+    p.add_argument("--json", action="store_true")
+    p = sub.add_parser("init", help="新建动漫文件夹")
+    p.add_argument("name")
+    p.add_argument("--library")
+    p.add_argument("--alias", action="append", default=[], help="别名，可多次")
+    p.add_argument("--note", default="")
+    p = sub.add_parser("migrate", help="把已有工程迁入 <动漫>/<集>/")
+    p.add_argument("--project", required=True)
+    p.add_argument("--series", required=True)
+    p.add_argument("--episode", default="EP01")
+    p.add_argument("--library")
+    p.add_argument("--move", action="store_true", help="移动而非复制（同盘秒级）")
+    p.add_argument("--dry-run", action="store_true")
+    a = ap.parse_args(argv)
+
+    if a.sub == "path":
+        print(WS.library_root(a.library))
+        return 0
+    if a.sub == "init":
+        d = WS.init_series(a.name, a.library, aliases=a.alias, note=a.note)
+        print(f"系列目录: {d}")
+        return 0
+    if a.sub == "migrate":
+        plan = WS.migrate(a.project, a.series, a.episode, library=a.library,
+                          move=a.move, dry_run=a.dry_run)
+        if a.dry_run:
+            print(f"[dry-run] {plan['mode']}: {plan['src']} → {plan['dst']}"
+                  f"（{plan['files']} 个文件）")
+        else:
+            print(f"完成（{plan['mode']}）→ {plan['dst']}")
+        return 0
+
+    # list
+    data = WS.list_series(a.library)
+    if a.json:
+        print(json.dumps(data, ensure_ascii=False, indent=1))
+        return 0
+    print(f"作品库: {WS.library_root(a.library)}")
+    if not data:
+        print("  （空：先 lib init <动漫名> 或 lib migrate --project <pj> --series <名>）")
+        return 0
+    print(f"  {'动漫':<20} {'集':<8} {'最新归档':<30} {'归档数':>4} {'成片':>8}  状态")
+    for s in data:
+        if not s["episodes"]:
+            print(f"  {s['series']:<20} {'-':<8} {'（尚无集工程）':<30}")
+        for e in s["episodes"]:
+            mb = f"{e['final_bytes'] / 1048576:.0f}MB" if e["final_bytes"] else "-"
+            st = "干净" if not e["stale"] else f"{len(e['stale'])} 条告警"
+            print(f"  {s['series']:<20} {e['episode']:<8} "
+                  f"{(e['latest_run'] or '未归档'):<30} {e['runs']:>4} {mb:>8}  {st}")
+            for w in e["stale"][:2]:
+                print(f"      ! {w[:88]}")
+    return 0
+
+
+def _runs(argv: list[str]) -> int:
+    """生成版本：列表 / 归档 / 最新指针 / 校验。"""
+    from . import workspace as WS
+
+    ap = argparse.ArgumentParser(prog="aicutplan runs", description="生成版本（runs）管理")
+    sub = ap.add_subparsers(dest="sub", required=True)
+    for name, h in (("list", "列出版本"), ("latest", "打印最新归档指针"),
+                    ("verify", "校验最新归档完整性")):
+        p = sub.add_parser(name, help=h)
+        p.add_argument("--project", required=True)
+        p.add_argument("--json", action="store_true")
+    p = sub.add_parser("snapshot", help="把当前成片归档为一次不可变 run")
+    p.add_argument("--project", required=True)
+    p.add_argument("--label", default="", help="版本标签，如 v36")
+    p.add_argument("--sentences", default=None, help="本次使用的句子稿")
+    p.add_argument("--note", default="")
+    a = ap.parse_args(argv)
+
+    if a.sub == "snapshot":
+        m = WS.snapshot(a.project, label=a.label, sentences=a.sentences, note=a.note)
+        run_dir = WS.project_dir(a.project) / WS.RUNS_DIR / m["run_id"]
+        print(f"[runs] 已归档 {m['run_id']} → {run_dir}")
+        print(f"       成片 {m['artifacts'].get('final.mp4', {}).get('bytes', 0) / 1048576:.1f}MB"
+              f"  产物 {len(m['artifacts'])} 个")
+        return 0
+    if a.sub == "latest":
+        d = WS.latest(a.project, verify=True)
+        if a.json:
+            print(json.dumps(d, ensure_ascii=False, indent=1))
+        else:
+            print(f"最新归档: {d['run_id']}  标签={d.get('label') or '-'}  "
+                  f"{d.get('created_at')}")
+            print(f"  成片: {d.get('final')}  ({d.get('final_bytes', 0) / 1048576:.1f}MB)")
+        return 0
+    if a.sub == "verify":
+        d = WS.latest(a.project, verify=False)
+        run_dir = WS.project_dir(a.project) / WS.RUNS_DIR / d["run_id"]
+        issues = WS.verify_run(run_dir)
+        if issues:
+            print(f"[verify] {d['run_id']} 有问题：")
+            for x in issues:
+                print("  ! " + x)
+            return 1
+        print(f"[verify] {d['run_id']} 全部产物指纹一致")
+        return 0
+
+    rows = WS.list_runs(a.project)
+    if a.json:
+        print(json.dumps(rows, ensure_ascii=False, indent=1))
+        return 0
+    if not rows:
+        print("（尚无归档；先 runs snapshot --project <pj> --label v1）")
+        return 0
+    print(f"{'run_id':<32}{'标签':<10}{'时间':<21}{'成片':>9}  最新")
+    for r in rows:
+        mb = f"{r['final_bytes'] / 1048576:.0f}MB" if r["final_bytes"] else "-"
+        print(f"{r['run_id']:<32}{r['label'] or '-':<10}{r['created_at']:<21}{mb:>9}"
+              f"  {'*' if r['is_latest'] else ''}")
+    return 0
 
 
 def _delegate(name: str, args: list[str]) -> int:
@@ -116,6 +243,10 @@ def main(argv: list[str] | None = None) -> int:
     if a.command == "version":
         print(f"aicutplan {__version__}")
         return 0
+    if a.command == "lib":
+        return _library(a.rest)
+    if a.command == "runs":
+        return _runs(a.rest)
     if a.command in ("check", "lint"):
         # 从透传参数里取 --project
         project = None

@@ -21,6 +21,7 @@ import argparse
 import json
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
@@ -80,10 +81,27 @@ def main() -> int:
     ap.add_argument("--qc-force", action="store_true", help="闭环文本未变也强制重合成")
     ap.add_argument("--subs", choices=["auto", "yes", "no"], default="auto",
                     help="auto=检测并提示 / yes=用内嵌字幕覆盖台词源 / no=不检查")
+    ap.add_argument("--no-snapshot", action="store_true",
+                    help="渲染成功后不归档到 runs/（默认自动归档并更新 latest）")
+    ap.add_argument("--label", default="", help="本次归档标签，如 v36（默认按时间）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
     PY = sys.executable
+
+    # 生成前污染扫描：旧 TTS / 旧质检帧 / 归档后未归档改动（只告警，不阻断）
+    try:
+        from aicutplan import workspace as WS
+        warns = [w for w in WS.scan_stale(proj_dir)
+                 if "尚无归档版本" not in w]
+        if warns:
+            print("[污染检查] 发现旧产物风险（不影响本次生成，但请留意）：", flush=True)
+            for w in warns[:5]:
+                print(f"  ! {w}", flush=True)
+        else:
+            print("[污染检查] 无旧产物风险", flush=True)
+    except Exception as e:
+        print(f"[污染检查] 跳过：{type(e).__name__} {str(e)[:80]}", flush=True)
 
     # 闭环局部重跑是独立动作，不能顺带重跑整条链（会覆盖刚改好的窗口/句子）
     if a.qc_apply:
@@ -163,6 +181,22 @@ def main() -> int:
               "→ cf_pipeline.py --qc-apply <改好的句子稿>")
     report(proj_dir)
     print(f"[cf_pipeline] 完成 → {proj_dir / 'out' / '03-rapid-narration.mp4'}")
+
+    # 生成后归档：本次成片 + 关键 JSON 快照进 runs/，并更新 latest 指针
+    if a.skip_render:
+        print("[runs] 本次跳过渲染，未归档（如需归档已有成片：runs snapshot）", flush=True)
+    elif a.no_snapshot:
+        print("[runs] --no-snapshot：未归档（latest 仍指向旧版本）", flush=True)
+    else:
+        try:
+            from aicutplan import workspace as WS
+            label = a.label or datetime.now().strftime("auto-%m%d-%H%M")
+            m = WS.snapshot(proj_dir, label=label, sentences=a.sentences)
+            print(f"[runs] 已归档 {m['run_id']}（{len(m['artifacts'])} 个产物）→ "
+                  f"runs/{m['run_id']}/", flush=True)
+        except Exception as e:
+            print(f"[runs] 归档失败（成片已生成，可手动 runs snapshot）："
+                  f"{type(e).__name__} {e}", flush=True)
     return 0
 
 

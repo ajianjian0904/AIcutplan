@@ -5,6 +5,35 @@
 
 ---
 
+## v0.8.0 · 2026-11-12 — 作品库布局 + 生成版本（runs）隔离
+
+**新增**
+- `aicutplan/workspace.py`（L0）：作品库 `<动漫>/<EPnn>/` 布局、`series.json`、
+  `runs/` 不可变快照（同盘硬链接、跨盘复制）、`manifest.json` 产物指纹、
+  `latest.json` 指针与校验、`scan_stale` 污染扫描、`migrate` 迁移（重写 workdir）。
+- CLI 新命令：`lib path|list|init|migrate`、`runs list|snapshot|latest|verify`。
+- `cf_pipeline` 渲染成功后自动归档（`--no-snapshot` 关闭、`--label` 指定标签），
+  生成前打印污染检查；`qc_loop` 闭环成功后同样归档。
+- r5_tts 为每条 TTS 写入 `mp3_sig` / `synth_at`；`scan_stale` 按音频指纹核对
+  （能抓到「元数据更新但音频没重合成」），skill 配方副本同步。
+
+**修复**
+- `contracts.lint_narration` 优先采信弹性对齐后的实测（`qc_report.speech`），
+  且按**内容**（句子集合 + 槽位容差 0.6s）判断报告是否适用 —— 修掉
+  `narrate --export` 刷新 mtime 后把已对齐句子误报超槽（句23/51）。
+- 迁移后译中缓存（按工程目录 hash 分桶）需同步复制，否则 web 台 `zh_ready=false`；
+  EP01 已按新路径 `519d1e975b37` 迁移。
+
+**迁移**
+- 当前工程已迁入 `E:/workbuddy/漫剪作品库/被驱逐的加强师/EP01`，成片 md5 不变
+  （`bf4e6445…`），基线归档 `r001`（v3.5）、`r002`（v3.5.1 回填音频指纹）。
+- web 台 `studio_state.json` 指向同步，`/review` 54 句、中文台词正常。
+
+**验证**
+- 新增 `tests/test_workspace.py` 25 项 + 契约 2 项；全套 166 项全绿。
+
+---
+
 ## v0.7.1 · 2026-11-12 — 配置收口：config/ 目录 + L0 配置层
 
 **结构**

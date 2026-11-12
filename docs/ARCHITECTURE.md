@@ -83,6 +83,7 @@ AIcutplan/
 │   ├── planning.py                hook_score / pick_hook_clip / weight / reason / is_continuous
 │   ├── evidence.py                load_shots / score_shot / format_shot_line / compact
 │   ├── config.py                  配置目录解析 / 容错读写 / 环境变量覆盖（config/ 优先）
+│   ├── workspace.py               作品库布局 / runs 版本快照 / latest 指针 / 污染扫描 / 迁移
 │   ├── cli.py + __main__.py       L2 门面：python -m aicutplan <cmd>
 │   │
 │   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
@@ -176,6 +177,20 @@ AIcutplan/
 
 工程根 = `project.json` 所在目录（**与仓库根无关**）。完整路径表见
 `aicutplan/paths.py::ProjectPaths`。
+
+### 作品库与生成版本（`aicutplan/workspace.py`）
+
+- **布局**：`<library>/<动漫>/<EPnn>/`，`series.json` 存别名，集目录即工程目录；
+  库根 `AICUTPLAN_LIBRARY` > `config/library.json` > `<仓库同级>/漫剪作品库`。
+- **归档**：`snapshot()` 把 `out/03-rapid-narration.mp4` 与关键 JSON 硬链接进
+  `runs/<run_id>/`（跨盘退化复制），`manifest.json` 记录每个产物的 sha1 短指纹
+  （大小+首尾 4MB），`latest.json` 记录最新 run 与成片指纹。
+- **指针校验**：`latest(verify=True)` 发现成片缺失/指纹不符**直接报错**，绝不静默
+  回退旧版本；`verify_run()` 可校验任意历史 run。
+- **污染扫描**：`scan_stale()` 输出「归档后未归档改动 / 音频指纹不符 / 旧质检帧 /
+  备份堆积」，`cf_pipeline` 每次生成前打印，`lib list` 每集显示告警数。
+- **迁移**：`migrate()` 默认硬链接复制、`--move` 同盘改名，并重写 `project.json`
+  的 `workdir`；目标已存在即报错，不覆盖。
 
 ### 配置解析（`aicutplan/config.py`）
 

@@ -49,6 +49,8 @@ def main() -> int:
                     help="文本未变也重跑（用于「文本已改但音频未重合成」的补跑）")
     ap.add_argument("--python", default=PY, help="渲染/规划解释器")
     ap.add_argument("--tts-python", default=TTS_PY, help="TTS 解释器（需 edge_tts）")
+    ap.add_argument("--no-snapshot", action="store_true", help="闭环完成后不归档到 runs/")
+    ap.add_argument("--label", default="", help="本次归档标签（默认 qc-时间）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -118,6 +120,15 @@ def main() -> int:
                 return 4
             print(f"[闭环] 音频校验通过：{len(changed)} 句 mp3 均为本次重合成")
     print("[闭环] 局部重跑完成 → 再跑 qc_visual.py --plan / --merge 复核失配是否消除")
+    if not a.no_snapshot:
+        try:
+            from datetime import datetime as _dt
+            from aicutplan import workspace as WS
+            m = WS.snapshot(proj_dir, label=a.label or _dt.now().strftime("qc-%m%d-%H%M"),
+                            sentences=a.apply)
+            print(f"[runs] 已归档 {m['run_id']}（{len(m['artifacts'])} 个产物）")
+        except Exception as e:
+            print(f"[runs] 归档失败（可手动 runs snapshot）：{type(e).__name__} {e}")
     return 0
 
 

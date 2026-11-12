@@ -162,6 +162,34 @@ class LintTests(unittest.TestCase):
             root = _project(td, wins, items, {"0": [1, 1], "1": [0, 0]})
             self.assertTrue(any("顺序回跳" in x for x in CT.lint_narration(root)))
 
+    def test_prefers_qc_report_post_fit_duration(self):
+        # tts-result 记的是弹性对齐**前**时长（3.8s > 槽位 3.0），
+        # qc_report 的 speech（2.6s）才是实际成片语音 → 不应误报超槽
+        with tempfile.TemporaryDirectory() as td:
+            wins = [_win(0, 3)]
+            text = "很长的旁白" * 6
+            items = [{"i": 0, "t0": 0.0, "dur": 2.0, "text": text, "beat": 0}]
+            tts = [{"i": 0, "text": text, "tts_dur": 3.8}]
+            root = _project(td, wins, items, {"0": [0, 0]}, tts=tts)
+            dump_json(root / "json" / "qc_report.json",
+                      [{"i": 0, "slot": 3.0, "speech": 2.6, "ratio": 0.87,
+                        "action": "ok"}])
+            self.assertEqual(CT.lint_narration(root), [])
+
+    def test_ignores_qc_report_from_other_cut(self):
+        # qc_report 的槽位与当前 cutplan 差 2s（换了剪辑版本）→ 不可采信，
+        # 回退 tts_dur 并如实报超槽
+        with tempfile.TemporaryDirectory() as td:
+            wins = [_win(0, 3)]
+            text = "很长的旁白" * 6
+            items = [{"i": 0, "t0": 0.0, "dur": 2.0, "text": text, "beat": 0}]
+            tts = [{"i": 0, "text": text, "tts_dur": 3.8}]
+            root = _project(td, wins, items, {"0": [0, 0]}, tts=tts)
+            dump_json(root / "json" / "qc_report.json",
+                      [{"i": 0, "slot": 5.0, "speech": 2.6, "ratio": 0.52,
+                        "action": "ok"}])
+            self.assertTrue(any("槽位" in x for x in CT.lint_narration(root)))
+
     def test_uses_measured_tts_dur_only_for_same_draft(self):
         # 同稿时实测时长 2.0s < 槽位，不应误报超槽
         with tempfile.TemporaryDirectory() as td:

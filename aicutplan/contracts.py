@@ -200,10 +200,42 @@ def lint_narration(proj_dir: str | Path) -> list[str]:
 
     fresh = (p.tts_result.exists() and p.narration.exists()
              and p.tts_result.stat().st_mtime >= p.narration.stat().st_mtime)
+
+    # 当前每句槽位（用于内容级判断 qc_report 是否仍适用于这一版 cutplan）
+    swi_all = al.get("sent_win_idx") or {}
+    slots: dict[int, float] = {}
+    for it in items:
+        swi = swi_all.get(str(it["i"]))
+        if swi and wins:
+            lo_i, hi_i = int(swi[0]), int(swi[1])
+            if 0 <= lo_i < len(wins) and 0 <= hi_i < len(wins):
+                slots[int(it["i"])] = (float(wins[hi_i]["new_end"])
+                                       - float(wins[lo_i]["new_start"]))
+
+    # 优先用弹性对齐后的实测（qc_report.speech）：tts-result 记的是对齐**前**的
+    # 原始时长，拿它判槽位会把已 atempo 压好的句子误报成超槽（句23/51 实际吻合）。
+    # qc_report 是否适用按**内容**判定（句子集合 + 槽位一致），不看 mtime ——
+    # narrate --export 等动作会刷新 narration.json，用时间戳会把有效报告判成过期。
+    qc_f = p.root / "json" / "qc_report.json"
+    qc_dur: dict[int, float] = {}
+    if qc_f.exists() and slots:
+        try:
+            rows = load_json(qc_f, default=[]) or []
+            by_i = {int(x["i"]): x for x in rows}
+            if set(by_i) == set(slots):
+                # cut.py 帧吸附会重写窗口时间（±0.15s 量级），故容差 0.6s
+                same = sum(1 for i, x in by_i.items()
+                           if abs(float(x.get("slot", -1e9)) - slots[i]) <= 0.6)
+                if same >= 0.95 * len(by_i):
+                    qc_dur = {i: float(x["speech"]) for i, x in by_i.items()
+                              if x.get("speech") is not None}
+        except Exception:
+            qc_dur = {}
     tts_dur = ({int(x["i"]): float(x.get("tts_dur") or 0)
                 for x in (load_json(p.tts_result, default={}).get("items") or [])}
                if fresh else {})
-    tol = 0.35 if fresh else 0.8
+    measured = qc_dur or tts_dur
+    tol = 0.35 if measured else 0.8
 
     for it in items:
         swi = (al.get("sent_win_idx") or {}).get(str(it["i"]))
@@ -215,7 +247,7 @@ def lint_narration(proj_dir: str | Path) -> list[str]:
             bad.append(f"句{it['i']} 窗口顺序回跳 ({lo} < {prev_end})")
         prev_end = hi
         slot = float(wins[hi]["new_end"]) - float(wins[lo]["new_start"])
-        est = tts_dur.get(int(it["i"])) or len(str(it.get("text", ""))) / CHARS_PER_SEC
+        est = measured.get(int(it["i"])) or len(str(it.get("text", ""))) / CHARS_PER_SEC
         if est > slot + tol:
             bad.append(f"句{it['i']} 语音 {est:.2f}s > 槽位 {slot:.2f}s"
                        f"（{str(it.get('text',''))[:14]}）")
