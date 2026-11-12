@@ -20,10 +20,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import story_parse as SP  # noqa: E402
+from aicutplan.shared import story_parse as SP  # noqa: E402
 
 DESC_SYS = ("你是动漫镜头标注员。给你一个剧情块内的所有镜头截图（每张前标注镜头号与源片秒，"
             "超过 6 秒的镜头会给前/中/尾三张，标注为 镜头号F/M/L）。"
@@ -116,7 +116,7 @@ def main() -> int:
         print(f"[镜头描述] 已有缓存 {len(old.get('rows', []))} 镜，--force 重生成")
         return 0
 
-    import narration as NR
+    from aicutplan.shared import narration as NR
     cfg = NR.llm_config()
     assert cfg, "DeepSeek 未配置"
 

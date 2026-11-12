@@ -24,7 +24,7 @@ from __future__ import annotations
 import bisect
 import re
 
-import sentence_studio as SS
+from aicutplan.webui import sentence_studio as SS
 
 # 信息刀候选：旁白里点名了数字、引文或次序，值得人工看一眼画面里在不在。
 # 只读提示，绝不据此自动换图（v6 的教训）。

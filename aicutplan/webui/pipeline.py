@@ -24,7 +24,7 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 SKILL = Path(r"C:/Users/10451/.workbuddy/skills/anime-recap/scripts")
 JOBS = ROOT / "cache" / "jobs"
 
@@ -174,14 +174,14 @@ def doctor(force: bool = False) -> dict:
 # 步骤定义
 # --------------------------------------------------------------------------
 def _cmd_prepare(proj_dir: Path, p: dict) -> list[str]:
-    return [PY, str(ROOT / "prepare_media.py"), "--project", str(proj_dir / "project.json")]
+    return [PY, str(ROOT / "aicutplan" / "legacy" / "prepare_media.py"), "--project", str(proj_dir / "project.json")]
 
 
 def _cmd_shots(proj_dir: Path, p: dict) -> list[str]:
     argv = ["--project", str(proj_dir / "project.json")]
     if p.get("scene") is not None:
         argv += ["--scene", str(p["scene"])]
-    return [PY, str(ROOT / "shots_scan.py")] + argv
+    return [PY, str(ROOT / "aicutplan" / "legacy" / "shots_scan.py")] + argv
 
 
 def _cmd_asr(proj_dir: Path, p: dict) -> list[str]:
@@ -190,7 +190,7 @@ def _cmd_asr(proj_dir: Path, p: dict) -> list[str]:
     argv = ["--project", str(proj_dir / "project.json"), "--lang", lang, "--size", size]
     if p.get("force"):
         argv.append("--force")
-    return [PY, str(ROOT / "asr_local.py")] + argv
+    return [PY, str(ROOT / "aicutplan" / "chain" / "asr_local.py")] + argv
 
 
 def _cmd_translate(proj_dir: Path, p: dict) -> list[str]:
@@ -201,7 +201,7 @@ def _cmd_translate(proj_dir: Path, p: dict) -> list[str]:
         argv += ["--limit", str(int(p["limit"]))]
     if p.get("reset"):
         argv.append("--reset")
-    return [PY, str(ROOT / "asr_pipeline.py")] + argv
+    return [PY, str(ROOT / "aicutplan" / "shared" / "asr_pipeline.py")] + argv
 
 
 def _cmd_script_script(proj_dir: Path, p: dict):
@@ -218,7 +218,7 @@ def _cmd_story(proj_dir: Path, p: dict) -> list[str]:
         argv.append("--force")
     if p.get("compose_only"):
         argv.append("--compose-only")
-    return [PY, str(ROOT / "story_parse.py")] + argv
+    return [PY, str(ROOT / "aicutplan" / "shared" / "story_parse.py")] + argv
 
 
 def _cmd_narr(proj_dir: Path, p: dict) -> list[str] | None:
@@ -238,7 +238,7 @@ def _cmd_tts(proj_dir: Path, p: dict) -> list[str] | None:
 
 def _cmd_align(proj_dir: Path, p: dict) -> list[str]:
     """先重建初版 cutplan 再对齐：n3 把 cutplan 当旧轴用，二次对齐前必须回到 script 的轴。"""
-    return [PY, str(ROOT / "align_chain.py"), "--project", str(proj_dir / "project.json")]
+    return [PY, str(ROOT / "aicutplan" / "legacy" / "align_chain.py"), "--project", str(proj_dir / "project.json")]
 
 
 def _cmd_cut(proj_dir: Path, p: dict) -> list[str] | None:
@@ -248,7 +248,7 @@ def _cmd_cut(proj_dir: Path, p: dict) -> list[str] | None:
 
 def _cmd_relayout(proj_dir: Path, p: dict) -> list[str]:
     # 句级精确重排（音频压在该句自己的画面上）；旧 relayout_narr 是块内等比近似
-    return [PY, str(ROOT / "relayout_smart.py"), "--project", str(proj_dir / "project.json")]
+    return [PY, str(ROOT / "aicutplan" / "legacy" / "relayout_smart.py"), "--project", str(proj_dir / "project.json")]
 
 
 def _cmd_mix(proj_dir: Path, p: dict) -> list[str] | None:
@@ -260,7 +260,7 @@ def _cmd_subtitle(proj_dir: Path, p: dict) -> list[str]:
     argv = ["--project", str(proj_dir / "project.json")]
     if p.get("burn"):
         argv.append("--burn")
-    return [PY, str(ROOT / "make_srt.py")] + argv
+    return [PY, str(ROOT / "aicutplan" / "legacy" / "make_srt.py")] + argv
 
 
 def _cmd_mux(proj_dir: Path, p: dict) -> list[str] | None:
@@ -413,7 +413,7 @@ def scan(proj_dir: Path) -> list[dict]:
             a = arts((str(f.relative_to(proj_dir)) if f else "asr_ja.json", "识别结果",
                       f"{n} 段" if n else None))
         elif sid == "translate":
-            import asr_pipeline as AP
+            from aicutplan.shared import asr_pipeline as AP
             shim = type("P", (), {"dir": Path(proj_dir)})()
             n = done = 0
             try:
@@ -852,7 +852,7 @@ def edit_shots(proj_dir: Path, action: str, p: dict) -> dict:
 # --------------------------------------------------------------------------
 def asr_merged(proj_dir: Path) -> dict:
     """ASR 原文 + 中文译文合并成一条可编辑的表。"""
-    import asr_pipeline as AP
+    from aicutplan.shared import asr_pipeline as AP
     src = asr_main(proj_dir)
     paras = ((_json(src, {}) or {}).get("paras") or []) if src else []
     shim = type("P", (), {"dir": Path(proj_dir)})()
@@ -881,7 +881,7 @@ def asr_merged(proj_dir: Path) -> dict:
 
 def save_asr_rows(proj_dir: Path, changes: list[dict]) -> dict:
     """只改文本，不动时间戳。原文写回 asr_*.json，译文写回 asr_zh.json。"""
-    import asr_pipeline as AP
+    from aicutplan.shared import asr_pipeline as AP
     src = asr_main(proj_dir)
     if not src:
         raise RuntimeError("工程里没有 asr_*.json")

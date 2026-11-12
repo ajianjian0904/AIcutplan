@@ -27,16 +27,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
-import narration as NR
-import jianying_export as JY
-import asr_pipeline as AP
-import sentence_studio as SS
-import preview_render as PR
-import review as RV
-import pipeline as PL
-import story_parse as SP
+from aicutplan.shared import narration as NR
+from aicutplan.webui import jianying_export as JY
+from aicutplan.shared import asr_pipeline as AP
+from aicutplan.webui import sentence_studio as SS
+from aicutplan.webui import preview_render as PR
+from aicutplan.webui import review as RV
+from aicutplan.webui import pipeline as PL
+from aicutplan.shared import story_parse as SP
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 WEB = ROOT / "web"
 FRAME_CACHE = ROOT / "cache" / "frames"
 CLIP_CACHE = ROOT / "cache" / "clips"

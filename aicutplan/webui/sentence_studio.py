@@ -17,7 +17,7 @@ import bisect
 import json
 from pathlib import Path
 
-import asr_pipeline as AP
+from aicutplan.shared import asr_pipeline as AP
 
 HEAD_IN = 0.10          # 与 server.py 一致：从镜头开头稍后一点进
 

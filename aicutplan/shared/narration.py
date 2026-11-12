@@ -23,7 +23,7 @@ import urllib.request
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 DRAFTS = ROOT / "drafts"
 TEMPLATES_FILE = ROOT / "templates.json"
 CALIB_FILE = ROOT / "tts_calibration.json"
@@ -319,7 +319,7 @@ def asr_segments(proj) -> list:
     模板变量 {asr_context} 会自动从「日语原文」切换成「中文台词」。
     """
     try:
-        import asr_pipeline as AP
+        from aicutplan.shared import asr_pipeline as AP
         out = AP.out_path(proj)
         if out.is_file():
             paras = json.loads(out.read_text(encoding="utf-8")).get("paras", [])

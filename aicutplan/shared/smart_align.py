@@ -25,10 +25,10 @@ import os
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import narration as NR  # noqa: E402  DeepSeek 客户端（语义配对/跨块覆盖共用）
+from aicutplan.shared import narration as NR  # noqa: E402  DeepSeek 客户端（语义配对/跨块覆盖共用）
 
 LEAD, GAP, CUT, SNAP = 0.10, 0.12, 1.32, 0.60
 MIN_STEP = 0.30          # 同句两刀至少在源上跳开多少秒，否则等于没切
@@ -44,7 +44,7 @@ def shots_of(proj_dir: Path) -> list[dict]:
     if f.exists():
         bounds = _load(f)["bounds"]
     else:
-        import story_parse as SP
+        from aicutplan.shared import story_parse as SP
         sl = SP.shotlist(proj_dir)
         bounds = [0.0] + [s["b"] for s in sl]
         f.parent.mkdir(exist_ok=True)
@@ -127,7 +127,7 @@ def semantic_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
 
     结果缓存在 story_plan.json 的 sent_event_map，重跑对齐不再花 token。
     """
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     plan = SP.load_plan(proj_dir)
     cached = plan.get("sent_event_map")
     n_total = sum(len(v) for v in by_beat.values())
@@ -271,7 +271,7 @@ def sentence_shot_map(proj_dir: Path, by_beat: dict, blocks: list[dict],
 
     候选池 = 事件区间内镜头 + 全片场景检索（scene_ts）映射回的镜头（标 ※）。
     """
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     plan = SP.load_plan(proj_dir)
     cached = plan.get("sent_shot_map")
     n_total = sum(len(v) for v in by_beat.values())
@@ -361,7 +361,7 @@ def scene_global_map(proj_dir: Path, by_beat: dict) -> dict[int, list[float]]:
     缓存 story_plan.json 的 sent_scene_global（秒数）。scene_desc 重生成后须删除此键。
     失败返回 {}（不影响主流程，只是没有跨块候选）。
     """
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     plan = SP.load_plan(proj_dir)
     cached = plan.get("sent_scene_global")
     n_total = sum(len(v) for v in by_beat.values())
@@ -445,7 +445,7 @@ def align(proj_dir: Path) -> dict:
     shots = shots_of(proj_dir)
     bounds_last = shots[-1]["b"]
 
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     sp = SP.load_plan(proj_dir)
     blocks = [b for b in (sp.get("blocks") or []) if b["type"] != "收录" and b["target"] > 0]
     events = sp.get("events") or []

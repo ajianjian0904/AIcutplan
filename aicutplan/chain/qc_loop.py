@@ -22,7 +22,7 @@ import sys
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 # 与既有流水线一致：渲染/规划用系统 Python，TTS 用带 edge_tts 的 WorkBuddy 环境
 PY = sys.executable
 TTS_PY = r"C:\Users\10451\.workbuddy\binaries\python\envs\default\Scripts\python.exe"
@@ -89,12 +89,12 @@ def main() -> int:
 
     only = ",".join(str(i) for i in changed)
     steps = [
-        ([a.python, str(ROOT / "narrate_cut.py"), "--project", str(pj),
+        ([a.python, str(ROOT / "aicutplan" / "chain" / "narrate_cut.py"), "--project", str(pj),
           "--sentences", str(sp)], None),
         ([a.tts_python, str(proj_dir / "r5_tts.py"), "--project", str(pj),
           "--only", only], proj_dir),
         # elastic_fit 内部会调 edge_tts 重合成超槽句，必须跟 r5 用同一个解释器
-        ([a.tts_python, str(ROOT / "elastic_fit.py"), "--project", str(pj)], None),
+        ([a.tts_python, str(ROOT / "aicutplan" / "chain" / "elastic_fit.py"), "--project", str(pj)], None),
         ([a.python, str(proj_dir / "r6_mix.py"), "--project", str(pj)], proj_dir),
         ([a.python, str(proj_dir / "r7_mux.py"), "--project", str(pj)], proj_dir),
     ]

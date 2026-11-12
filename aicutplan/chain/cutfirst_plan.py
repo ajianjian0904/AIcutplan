@@ -24,10 +24,10 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-from smart_align import shots_of, _load  # noqa: E402
+from aicutplan.shared.smart_align import shots_of, _load  # noqa: E402
 
 LEAD = 0.10
 MIN_SHOT, MAX_SHOT = 0.8, 3.5

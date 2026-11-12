@@ -24,11 +24,11 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import pipeline as PL  # noqa: E402
-import story_parse as SP  # noqa: E402
+from aicutplan.webui import pipeline as PL  # noqa: E402
+from aicutplan.shared import story_parse as SP  # noqa: E402
 
 
 def axis_drift(proj_dir: Path) -> float:
@@ -64,7 +64,7 @@ def main() -> int:
     proj_dir = pj.parent
 
     if not a.classic:
-        import smart_align as SA
+        from aicutplan.shared import smart_align as SA
         r = SA.align(proj_dir)
         print(f"[句级对齐] {r['cuts']} 刀 / {r['duration']}s / {r['beats']} 块", flush=True)
         return 0

@@ -19,7 +19,7 @@ import subprocess
 import time
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 OUT = ROOT / "cache" / "preview_clips"
 OUT.mkdir(parents=True, exist_ok=True)
 

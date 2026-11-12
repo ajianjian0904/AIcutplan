@@ -22,10 +22,10 @@ import sys
 import urllib.request
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import story_parse as SP  # noqa: E402
+from aicutplan.shared import story_parse as SP  # noqa: E402
 
 DESC_SYS = ("你是动漫分镜分析师。给你按时间顺序排列的连续画面截图（每张前标注源片秒）"
             "和该时刻的人物台词（日语原文）。请结合镜头语言与对话，为每个时间窗写场景描述。")

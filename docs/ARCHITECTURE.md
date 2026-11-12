@@ -1,7 +1,7 @@
 # 架构说明 · AIcutplan
 
 > 本文件是「哪个脚本属于哪一层、被谁调用、产出什么」的唯一权威清单。
-> 每个根目录脚本顶部的 `# [L...]` 标识与本文件对应。
+> 每个模块顶部的 `# [L...]` 标识与本文件对应（模块已按层入 aicutplan/ 子包）。
 
 ---
 
@@ -54,7 +54,7 @@
 
 | | cut-first 新主链 | web 台旧 17 步链 |
 |---|---|---|
-| 入口 | `cf_pipeline.py` / `python -m aicutplan run` | `server.py`（`start.bat`）→ `/flow` |
+| 入口 | `aicutplan/chain/cf_pipeline.py` / `python -m aicutplan run` | `python -m aicutplan.webui.server`（start.bat）→ `/flow` |
 | 时序哲学 | **画面先定 → 旁白后写** | 旁白定稿 → TTS → 用语音时长裁画面 |
 | 核心脚本 | causal_graph / cutfirst_plan / narrate_cut / elastic_fit | align_chain / smart_align / relayout_smart / make_srt |
 | LLM 依赖 | 可完全会话内（零 API） | 剧情解析、译中、写稿默认走 DeepSeek |
@@ -72,70 +72,82 @@
 
 ```
 AIcutplan/
-├── aicutplan/                 L0 基础层（可打包、零第三方依赖、单测主体）
-│   ├── __init__.py            版本 + 分层说明 + 硬规则
-│   ├── paths.py               ProjectPaths：工程根 / json / out / tts / .qcframes
-│   ├── io.py                  load_json / dump_json（原子写）/ backup_copy / backup_rename
-│   ├── media.py               ffmpeg_bin / probe_json / probe_duration / extract_frame
-│   ├── cache.py               content_sig / source_sig / is_stale / sig_valid / cache_valid
-│   ├── contracts.py           窗口·句子·证据包 schema + lint_narration / check_alignment
-│   ├── subtitles.py           probe_subs / clean_text / parse_srt / merge_same_time / sniff_lang
-│   ├── planning.py            hook_score / pick_hook_clip / weight / reason / is_continuous
-│   ├── evidence.py            load_shots / score_shot / format_shot_line / compact
-│   ├── cli.py                 python -m aicutplan <cmd> 门面
-│   └── __main__.py
-├── docs/ARCHITECTURE.md       本文件
-├── tests/                     标准库 unittest，零第三方依赖
-├── web/                       8 个页面的静态文件（html / js / css，无构建）
+├── aicutplan/                     Python 包（全部代码按层入包，根目录零 .py）
+│   ├── __init__.py                版本 + 分层说明 + 硬规则
+│   ├── paths.py                   ProjectPaths：工程根 / json / out / tts / .qcframes / repo_root
+│   ├── io.py                      load_json / dump_json（原子写）/ backup_copy / backup_rename
+│   ├── media.py                   ffmpeg_bin / probe_json / probe_duration / extract_frame
+│   ├── cache.py                   content_sig / source_sig / is_stale / sig_valid / cache_valid
+│   ├── contracts.py               窗口·句子·证据包 schema + lint_narration / check_alignment
+│   ├── subtitles.py               probe_subs / clean_text / parse_srt / merge_same_time / sniff_lang
+│   ├── planning.py                hook_score / pick_hook_clip / weight / reason / is_continuous
+│   ├── evidence.py                load_shots / score_shot / format_shot_line / compact
+│   ├── cli.py + __main__.py       L2 门面：python -m aicutplan <cmd>
+│   │
+│   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
+│   │   ├── narration.py           LLM 客户端 / 预算门禁 / 模板 / drafts
+│   │   ├── story_parse.py         事件表 / 块表 / 段缓存 + 证据回喂
+│   │   ├── smart_align.py         shots_of / _load / 旧句级对齐
+│   │   ├── asr_pipeline.py        译中缓存 asr/<pkey>/（断点续传）
+│   │   └── evidence_feed.py       镜头证据聚合（story_parse / causal_graph 的库）
+│   │
+│   ├── chain/                     L1 cut-first 主链（由 cf_pipeline 编排）
+│   │   ├── cf_pipeline.py         L2 一键主链编排（入口）
+│   │   ├── qc_loop.py             L2 质检闭环编排
+│   │   ├── subs_extract.py        ①台词源：内嵌字幕优先，跳过 ASR
+│   │   ├── asr_local.py           ①台词源回退：faster-whisper
+│   │   ├── causal_graph.py        ②因果图谱 func/cause/result
+│   │   ├── cutfirst_plan.py       ③画面先定：连续爽点钩子 + 权重选窗
+│   │   ├── narrate_cut.py         ④旁白后写 / 写作表导出
+│   │   ├── elastic_fit.py         ⑤TTS 音频弹性适配已定槽位
+│   │   └── qc_visual.py           ⑥会话内逐句质检 plan/merge/probe
+│   │
+│   ├── session/                   L1 会话内工具（读图批次，产出被主链消费）
+│   │   ├── shot_desc.py           镜头证据包生成器（数据契约）
+│   │   ├── session_desc.py        会话内读图批次 plan/merge
+│   │   ├── scene_desc.py          2s 窗场景解析（历史实现）
+│   │   └── scene_from_shots.py    镜头描述推导 2s 窗（零读图）
+│   │
+│   ├── legacy/                    L1 旧检索腿（web 台 17 步运行按钮仍调用）
+│   │   ├── prepare_media.py       洗片去广告 / 转封装
+│   │   ├── shots_scan.py          镜头切分
+│   │   ├── align_chain.py         旧对齐前置（新链已停用）
+│   │   ├── relayout_smart.py      旧句级重排（新链由 elastic_fit 取代）
+│   │   └── make_srt.py            字幕生成 / 烧字幕
+│   │
+│   └── webui/                     L3 本地 HTTP 校对台（127.0.0.1:8765，标准库零依赖）
+│       ├── server.py              入口（start.bat → python -m aicutplan.webui.server）
+│       ├── pipeline.py            17 步定义 / 环境体检 / 后台任务
+│       ├── sentence_studio.py     句级锚点数据层
+│       ├── review.py              逐句三轨校对数据层
+│       ├── preview_render.py      块级预览渲染
+│       ├── jianying_export.py     剪映草稿导出
+│       └── jianying_worker.py     剪映子进程
 │
-├── cf_pipeline.py             L2 一键主链编排
-├── qc_loop.py                 L2 质检闭环编排
-├── causal_graph.py            L1 新链 ①
-├── cutfirst_plan.py           L1 新链 ②
-├── narrate_cut.py             L1 新链 ④
-├── elastic_fit.py             L1 新链 ⑥
-├── qc_visual.py               L1 新链 ⑧
-├── subs_extract.py            L1 台词源（内嵌字幕优先）
-├── evidence_feed.py           L1 证据回喂（story_parse / causal_graph 的库）
-├── story_parse.py             L1 共享库（事件表 / 块表 / 段缓存）
-├── narration.py               L1 共享库（LLM 客户端 / 预算门禁 / 模板）
-├── smart_align.py             L1 共享库（shots_of / _load / 旧句级对齐）
-├── asr_pipeline.py            L1 共享库（译中缓存 / 断点续传）
-├── asr_local.py               L1 台词源（faster-whisper 回退）
-├── session_desc.py            L1 会话内工具（读图批次 plan/merge）
-├── shot_desc.py               L1 会话内工具（镜头证据包生成器）
-├── scene_desc.py              L1 会话内工具（2s 窗场景解析，历史实现）
-├── scene_from_shots.py        L1 会话内工具（镜头描述推导 2s 窗，零读图）
-├── server.py                  L3 web 台入口
-├── pipeline.py                L3 17 步定义 / 环境体检 / 后台任务
-├── sentence_studio.py         L3 句级锚点数据层
-├── review.py                  L3 逐句三轨校对数据层
-├── preview_render.py          L3 临时预览渲染
-├── jianying_export.py         L3 剪映草稿导出
-├── jianying_worker.py         L3 剪映子进程
-├── prepare_media.py           L1 旧链：洗片
-├── shots_scan.py              L1 旧链：镜头切分
-├── align_chain.py             L1 旧链：对齐前置（新链已停用）
-├── relayout_smart.py          L1 旧链：句级重排（新链由 elastic_fit 取代）
-├── make_srt.py                L1 旧链：字幕 / 烧字幕
-│
-├── pyproject.toml / requirements.txt / .gitignore / CHANGELOG.md
-├── templates.json / tts_calibration.json / start.bat / studio_state.json（本机，忽略）
-└── cache/ asr/ drafts/ exports/   运行时数据（.gitignore）
+├── docs/ARCHITECTURE.md           本文件
+├── tests/                         标准库 unittest（含 test_wrappers 守卫别名唯一实现）
+├── web/                           8 个页面的静态文件（html / js / css，无构建）
+├── pyproject.toml / requirements.txt / .gitignore / CHANGELOG.md / start.bat
+├── templates.json / tts_calibration.json / llm_config.json（配置，忽略或本机）
+└── cache/ asr/ drafts/ exports/ studio_state.json   运行时数据（.gitignore）
 ```
 
-### 为什么阶段脚本保持在根目录
+### 分层迁移怎么解决的四个历史约束
 
-这是**硬约束**，不是没整理干净：
+旧版把「彻底分包」判为硬约束，本次迁移逐条解开：
 
-1. 跨脚本互相定位依赖 `ROOT = Path(__file__).resolve().parent`；
-2. `cf_pipeline.py` 用 `ROOT / "xxx.py"` 以子进程方式启动阶段脚本；
-3. 仓库外的工程脚本 `cut.py / r5_tts.py / r6_mix.py / r7_mux.py` 按「`project.json`
-   所在目录」约定读写 `json/` `out/` `tts/`；
-4. `server.py` 用 `ROOT / "web"` 提供静态页。
+1. `ROOT = Path(__file__).resolve().parent` → 统一改为 `parents[2]`（仓库根），
+   运行时数据目录（asr/cache/drafts/exports/web/studio_state）路径与迁移前完全一致；
+2. `cf_pipeline / qc_loop / pipeline / jianying_export` 的子进程路径改为
+   `ROOT / "aicutplan" / "<子包>" / "xxx.py"`；`cli.py` 门面映射同步；
+3. 工程目录脚本 `cut.py / r5_tts.py / r6_mix.py / r7_mux.py` 本就在工程目录，
+   与仓库布局无关，零改动；
+4. 裸导入 `import narration as NR` → `from aicutplan.shared import narration as NR`
+   等包内绝对导入，`sys.path` 注入一律指向仓库根。
 
-把它们搬进 `src/aicutplan/` 会同时打断以上四条。因此**只把无副作用、可单测的共享
-能力抽进包**，阶段脚本保持扁平，用顶部 `# [L...]` 注释 + 本文件标识分层。
+依赖方向约束：`chain / webui → shared → L0` 单向；`legacy → shared / webui` 允许；
+`shared` 不得反向 import `chain / webui`（成环）。测试 `test_wrappers.py` 守卫
+「兼容别名必须指向 L0 唯一实现」，防止再抄出第二份真相。
 
 ---
 

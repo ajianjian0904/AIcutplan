@@ -7,8 +7,8 @@
 
 | 你要做什么 | 用哪条 | 入口 |
 |---|---|---|
-| 出一集成片（当前主线） | **cut-first 新主链** | `python -m aicutplan run` 或 `cf_pipeline.py` |
-| 逐句审稿 / 挑首镜尾镜 / 看三轨 / 导出草稿 | **web 校对台（旧链）** | `python server.py` → `http://127.0.0.1:8765` |
+| 出一集成片（当前主线） | **cut-first 新主链** | `python -m aicutplan run` 或 `python -m aicutplan.webui.server` 同级用门面 |
+| 逐句审稿 / 挑首镜尾镜 / 看三轨 / 导出草稿 | **web 校对台（旧链）** | `python -m aicutplan serve` → `http://127.0.0.1:8765` |
 
 完整分层、依赖全表与设计约束见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**；
 变更历史见 [CHANGELOG.md](CHANGELOG.md)。
@@ -27,7 +27,7 @@ pip install -e ".[tts,vision]"
 # 或按需安装：pip install -r requirements.txt（文件内按用途分组，默认全注释）
 
 # web 校对台
-python server.py            # 或双击 start.bat → http://127.0.0.1:8765
+python -m aicutplan serve    # 或双击 start.bat → http://127.0.0.1:8765
 ```
 
 统一 CLI 门面（参数原样透传给对应阶段脚本）：
@@ -41,27 +41,36 @@ python -m aicutplan serve                                           # web 台
 ```
 
 `run / plan / subs / qc / qc-apply / narrate / parse / serve` 都是薄门面，
-业务逻辑仍在根目录脚本里，不存在两份实现。
+业务逻辑在 `aicutplan/` 各子包里，不存在两份实现。
 
 ---
 
 ## 项目结构
 
 ```
-aicutplan/        L0 基础层（可打包、零依赖、单测主体）
-  paths io media cache contracts       工程路径 / 原子写 / ffmpeg / 内容指纹 / 数据契约
-  subtitles planning evidence cli     领域纯函数 + 统一 CLI
-docs/             架构说明
+aicutplan/                    Python 包（全部代码按层入包，根目录零 .py）
+  paths io media cache contracts subtitles planning evidence
+                              L0 基础层：路径 / 原子写 / ffmpeg / 指纹 / 契约 / 领域纯函数
+  cli.py __main__.py          L2 统一 CLI 门面（python -m aicutplan <cmd>）
+  shared/                     L1 共享库：narration story_parse smart_align
+                              asr_pipeline evidence_feed（新旧两链共用）
+  chain/                      L1 cut-first 主链：cf_pipeline cutfirst_plan causal_graph
+                              narrate_cut elastic_fit qc_loop qc_visual subs_extract asr_local
+  session/                    L1 会话内工具：shot_desc session_desc scene_desc scene_from_shots
+  legacy/                     L1 旧检索腿：prepare_media shots_scan align_chain
+                              relayout_smart make_srt（web 台旧链运行按钮仍调用）
+  webui/                      L3 web 校对台：server pipeline sentence_studio review
+                              preview_render jianying_export jianying_worker
+docs/             架构说明（分层图 / 数据契约 / 缓存事故清单）
 tests/            标准库 unittest 测试（零 ffmpeg / 零网络 / 零模型）
 web/              8 个页面的静态文件（无构建）
-根目录 *.py       L1 阶段脚本 / L2 编排 / L3 web 台，每个文件顶部有 # [L...] 分层标识
 pyproject.toml requirements.txt .gitignore CHANGELOG.md
 ```
 
-**为什么阶段脚本不搬进包目录**：脚本靠 `ROOT = Path(__file__).parent` 互相定位、
-`cf_pipeline` 用相对 ROOT 起子进程、仓库外的 `cut.py/r5_tts/r6_mix/r7_mux` 按工程
-目录约定读写文件。彻底分包会打断这三条，所以只把无副作用、可单测的共享能力抽进包。
-详见 [架构说明 §3](docs/ARCHITECTURE.md)。
+分层规则：`chain/webui → shared → L0` 单向依赖；`legacy → shared/webui` 允许；
+`shared` 不得反向 import `chain/webui`（会成环）。所有脚本里的 `ROOT` 一律指仓库根
+（`parents[2]`），运行时数据（`cache/ asr/ drafts/ exports/ studio_state.json`）都落
+在仓库根，与脚本所在层无关。详见 [架构说明 §3](docs/ARCHITECTURE.md)。
 
 ---
 
@@ -75,17 +84,17 @@ pyproject.toml requirements.txt .gitignore CHANGELOG.md
 PY=D:/Python312/python.exe
 PJ=<工程目录>/project.json
 
-$PY cf_pipeline.py --project $PJ --sentences sents.json --qc
+$PY -m aicutplan run --project $PJ --sentences sents.json --qc
 # 等价：python -m aicutplan run --project $PJ --sentences sents.json --qc
 ```
 
 | # | 脚本 | 做什么 | 产物 |
 |---|---|---|---|
-| 0 | `subs_extract.py`（`--subs yes`） | 源片自带字幕时直接提取，跳过 ASR | `ja-segments.json` / `asr_ja.json` / 译中缓存 |
+| 0 | `chain/subs_extract.py`（`--subs yes`） | 源片自带字幕时直接提取，跳过 ASR | `ja-segments.json` / `asr_ja.json` / 译中缓存 |
 | 1 | `causal_graph.py` | 事件补 `func/cause/result`，证据回喂 | `story_plan.causal` |
 | 2 | `cutfirst_plan.py` | 画面先定：连续爽点钩子 + 叙事权重选窗 | `json/cutplan.json` |
 | 3 | `cut.py`（工程目录） | 粗剪无声视频 + 原声轨 | `02-video-rapid-silent.mp4` |
-| 4 | `narrate_cut.py` | 旁白后写 / 导出写作输入表 | `narration.json` / `align.json` / `window_table.md` |
+| 4 | `chain/narrate_cut.py` | 旁白后写 / 导出写作输入表 | `narration.json` / `align.json` / `window_table.md` |
 | 5 | `lint_narration`（L0 contracts） | 窗口全覆盖 / 槽位预算 / 顺序单调 | 违规清单（默认阻断） |
 | 6 | `r5_tts.py` + `elastic_fit.py` | TTS + 音频弹性适配已定槽位 | `tts/NNN.mp3` / `qc_report.json` |
 | 7 | `r6_mix.py` + `r7_mux.py` | 混音 + 合片 + 12 项验收 | **`out/03-rapid-narration.mp4`** |
@@ -128,20 +137,20 @@ $PY cf_pipeline.py --project $PJ --sentences sents.json --qc
 
 ```bash
 # 1) 镜头证据包：分批读图（每轮 ≤8 帧）
-$PY session_desc.py --project $PJ --plan 8      # 生成批次清单
-#    会话内读图后： $PY session_desc.py --project $PJ --merge
-$PY scene_from_shots.py --project $PJ           # 推导 2s 窗场景描述（零读图）
+$PY aicutplan/session/session_desc.py --project $PJ --plan 8      # 生成批次清单
+#    会话内读图后： $PY aicutplan/session/session_desc.py --project $PJ --merge
+$PY aicutplan/session/scene_from_shots.py --project $PJ           # 推导 2s 窗场景描述（零读图）
 
 # 2) 导出写作输入表，会话内写句子稿 sents.json
-$PY narrate_cut.py --project $PJ --export       # → window_table.md
-$PY narrate_cut.py --project $PJ --sentences sents.json
+$PY -m aicutplan narrate --project $PJ --export       # → window_table.md
+$PY -m aicutplan narrate --project $PJ --sentences sents.json
 
 # 3) 生成后质检闭环
-$PY qc_visual.py --project $PJ --plan 6         # 2×3 宫格图 + plan_XX.json
+$PY -m aicutplan qc --project $PJ --plan 6         # 2×3 宫格图 + plan_XX.json
 #    会话内逐格判定，写 .qcframes/session/verdict_XX.json：{"i":3,"match":0,"why":"..."}
-$PY qc_visual.py --project $PJ --merge          # → qc_visual.json + qc_rewrite.json
-$PY qc_visual.py --project $PJ --probe          # 失配句抽 3 帧复核，排除单帧假阳性
-$PY cf_pipeline.py --project $PJ --qc-apply <改好的句子稿>
+$PY -m aicutplan qc --project $PJ --merge          # → qc_visual.json + qc_rewrite.json
+$PY -m aicutplan qc --project $PJ --probe          # 失配句抽 3 帧复核，排除单帧假阳性
+$PY -m aicutplan run --project $PJ --qc-apply <改好的句子稿>
 ```
 
 - 抽帧取**句子首窗中点**（一句可跨 6 窗，整句中点会落到后半段画面）；`--plan`
@@ -162,10 +171,10 @@ faster-whisper 的段时间戳会漂移 3–16s；字幕还常带「（バリオ
 检测到文本字幕就直接提取，不再跑 ASR。
 
 ```bash
-$PY subs_extract.py --project $PJ                          # 只探测对比，不写文件
-$PY subs_extract.py --project $PJ --apply --refresh-derived
-$PY subs_extract.py --project $PJ --prefer en             # 改成优先英文字幕
-$PY subs_extract.py --project $PJ --check                 # 校验内容指纹是否过期
+$PY -m aicutplan subs --project $PJ                          # 只探测对比，不写文件
+$PY -m aicutplan subs --project $PJ --apply --refresh-derived
+$PY -m aicutplan subs --project $PJ --prefer en             # 改成优先英文字幕
+$PY -m aicutplan subs --project $PJ --check                 # 校验内容指纹是否过期
 ```
 
 - 探测**原始源片**（`project.json` 的 `source_video`），不能用 `out/01-video-no-ad.mp4`
@@ -178,7 +187,7 @@ $PY subs_extract.py --project $PJ --check                 # 校验内容指纹�
 - 顶层写 `source: embedded-subtitle` 与 `sig`，`--check` 用 `aicutplan.cache.sig_valid`
   比对，源片换了但台词源没更新时返回非 0。
 - `asr_local.py` 检测到文本字幕会自动跳过 faster-whisper（`--force-asr` 强制）；
-  `cf_pipeline.py --subs yes` 在链路开始前替换，默认 `auto` 只提示、不动已定型工程。
+  `python -m aicutplan run --subs yes` 在链路开始前替换，默认 `auto` 只提示、不动已定型工程。
 - 时间轴前提：字幕时间是源片原始秒。若洗片裁过广告，需先给字幕加偏移，脚本不自动估计。
 
 实测当前工程：台词源 ASR 404 段 → 内嵌字幕 352 条，`shots_desc.dlg` 覆盖率

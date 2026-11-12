@@ -29,7 +29,7 @@ from pathlib import Path
 
 import edge_tts
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
 SILENCE = 0.60        # edge-tts 每句首尾静音估计（r5 实测 ~0.7s，取保守 0.6）

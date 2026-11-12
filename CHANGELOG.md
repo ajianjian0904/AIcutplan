@@ -5,6 +5,30 @@
 
 ---
 
+## v0.7.0 · 2026-11-12 — 目录分层：全部脚本按层入包
+
+**结构**
+- 30 个根目录脚本全部 `git mv` 进 `aicutplan/` 五个子包：`shared/`（共享库 5 个）、
+  `chain/`（cut-first 主链 9 个）、`session/`（会话内工具 4 个）、`legacy/`（旧检索腿
+  5 个）、`webui/`（web 校对台 7 个）。**根目录零 `.py`**。
+- 跨脚本裸导入全部改为包内绝对导入（`import narration as NR` →
+  `from aicutplan.shared import narration as NR`）；`ROOT` 统一改为 `parents[2]`
+  （仓库根），运行时数据目录（asr/cache/drafts/exports/web/studio_state.json）
+  路径与迁移前逐字节一致。
+- `cf_pipeline / qc_loop / pipeline / subs_extract / jianying_export` 的子进程路径、
+  `cli.py` 门面映射、`start.bat`（→ `py -3.12 -m aicutplan.webui.server`）、
+  `tests/test_wrappers` 导入全部同步新位置。
+- 依赖方向约束成文：`chain/webui → shared → L0` 单向，`shared` 不得反向依赖
+  `chain/webui`（防导入环）。
+
+**验证**
+- 122 项 unittest 全绿；27 个模块导入冒烟通过；ep01cf 真实工程回归：
+  `check` 全过、`run --subs auto --skip-*` 退出 0、`narrate --export` /
+  `causal_graph --export-prompt` / `story_parse --export-prompt` 正常、
+  web 台从新路径启动后 5 页面 200 且工程指向保留（studio_state 未迁移）。
+
+---
+
 ## v0.6.0 · 2026-11-12 — 项目整理与模块化
 
 **结构**

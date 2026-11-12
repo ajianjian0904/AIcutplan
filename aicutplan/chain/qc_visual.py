@@ -29,7 +29,7 @@ from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageStat
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 from aicutplan.media import ffmpeg_bin   # noqa: E402  L0 统一实现

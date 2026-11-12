@@ -31,11 +31,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))  # 被其它脚本 import 时也能找到同目录模块
-import narration as NR
-import evidence_feed as EF   # P0-2：已有镜头证据包回喂上游（零新增抽帧/读图）
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # 被其它脚本 import 时也能找到同目录模块
+from aicutplan.shared import narration as NR
+from aicutplan.shared import evidence_feed as EF   # P0-2：已有镜头证据包回喂上游（零新增抽帧/读图）
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 CACHE = ROOT / "cache" / "story"
 
 SEG_SYS = ("你是动漫速讲的剧情分析师。用户会给你一段原片的台词（源片秒）和按时间顺序排列的画面截图，"
@@ -182,7 +182,7 @@ def segments(proj_dir, seg_sec: float = 180.0) -> list:
 # --------------------------------------------------------------------------
 def zh_subtitles(proj_dir) -> list:
     """中文台词（源片秒）。优先工作区译中结果，缺失时退回原文。"""
-    import asr_pipeline as AP
+    from aicutplan.shared import asr_pipeline as AP
     shim = type("P", (), {"dir": Path(proj_dir)})()
     paras = []
     try:

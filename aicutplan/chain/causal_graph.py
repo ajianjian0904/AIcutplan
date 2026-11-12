@@ -20,11 +20,11 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import narration as NR  # noqa: E402
-import evidence_feed as EF  # noqa: E402
+from aicutplan.shared import narration as NR  # noqa: E402
+from aicutplan.shared import evidence_feed as EF  # noqa: E402
 
 CAUSAL_SYS = ("你是动漫剧情结构分析师。给你一集动画的事件表（按时间顺序，含秒区间与概要）"
               "和每个事件区间里的镜头证据（画面描述与台词）。任务：梳理事件之间的因果关系与叙事功能，"
@@ -83,7 +83,7 @@ def commit(proj_dir: Path, plan: dict, causal: dict) -> None:
     if not bak.exists():
         bak.write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
     plan["causal"] = causal
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     SP.save_plan(proj_dir, plan)
     n_func = sum(1 for v in causal.values() if v.get("func") in FUNC_SET)
     n_link = sum(1 for v in causal.values() if v.get("cause") or v.get("result"))
@@ -101,7 +101,7 @@ def main() -> int:
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
 
-    import story_parse as SP
+    from aicutplan.shared import story_parse as SP
     plan = SP.load_plan(proj_dir)
     evs = plan.get("events") or []
     live = [e for e in evs if (e.get("type") or "") != "收录"]

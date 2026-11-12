@@ -23,7 +23,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
 
@@ -87,7 +87,7 @@ def main() -> int:
 
     # 闭环局部重跑是独立动作，不能顺带重跑整条链（会覆盖刚改好的窗口/句子）
     if a.qc_apply:
-        cmd = [PY, str(ROOT / "qc_loop.py"), "--project", str(pj),
+        cmd = [PY, str(ROOT / "aicutplan" / "chain" / "qc_loop.py"), "--project", str(pj),
                "--apply", str(Path(a.qc_apply).expanduser().resolve())]
         if a.dry_run:
             cmd.append("--dry-run")
@@ -106,11 +106,11 @@ def main() -> int:
             if seg_f.exists():
                 marked = json.loads(seg_f.read_text(encoding="utf-8")).get(
                     "source") == "embedded-subtitle"
-            import subs_extract as SE
+            from aicutplan.chain import subs_extract as SE
             avail = raw.exists() and any(
                 s["codec"] in SE.TEXT_CODECS for s in SE.probe_subs(raw))
             if avail and (a.subs == "yes" or not seg_f.exists()):
-                if run([PY, str(ROOT / "subs_extract.py"), "--project", str(pj),
+                if run([PY, str(ROOT / "aicutplan" / "chain" / "subs_extract.py"), "--project", str(pj),
                         "--apply", "--refresh-derived", "--video", str(raw)]):
                     print("[台词源] 已用内嵌字幕，跳过音转字", flush=True)
             elif avail and not marked:
@@ -121,16 +121,16 @@ def main() -> int:
 
     # 0) 因果图谱（缓存则跳过）
     if not a.skip_plan:
-        if not run([PY, str(ROOT / "causal_graph.py"), "--project", str(pj)]):
+        if not run([PY, str(ROOT / "aicutplan" / "chain" / "causal_graph.py"), "--project", str(pj)]):
             return 2
         # 1) 画面先定
-        if not run([PY, str(ROOT / "cutfirst_plan.py"), "--project", str(pj)]):
+        if not run([PY, str(ROOT / "aicutplan" / "chain" / "cutfirst_plan.py"), "--project", str(pj)]):
             return 2
         # 2) 无声粗剪（工程脚本）
         if not run([PY, str(proj_dir / "cut.py"), "--project", str(pj), "--force"], cwd=proj_dir):
             return 2
     # 3) 旁白后写（会话模式 / API 模式）
-    cmd = [PY, str(ROOT / "narrate_cut.py"), "--project", str(pj)]
+    cmd = [PY, str(ROOT / "aicutplan" / "chain" / "narrate_cut.py"), "--project", str(pj)]
     if a.sentences:
         cmd += ["--sentences", str(Path(a.sentences).resolve())]
     if not run(cmd):
@@ -147,7 +147,7 @@ def main() -> int:
     if not a.skip_tts:
         if not run([PY, str(proj_dir / "r5_tts.py"), "--project", str(pj)], cwd=proj_dir):
             return 2
-        if not run([PY, str(ROOT / "elastic_fit.py"), "--project", str(pj)]):
+        if not run([PY, str(ROOT / "aicutplan" / "chain" / "elastic_fit.py"), "--project", str(pj)]):
             return 2
     # 6) 混音 + 合流
     if not a.skip_render:
@@ -156,7 +156,7 @@ def main() -> int:
         if not run([PY, str(proj_dir / "r7_mux.py"), "--project", str(pj)], cwd=proj_dir):
             return 2
     if a.qc:
-        if not run([PY, str(ROOT / "qc_visual.py"), "--project", str(pj),
+        if not run([PY, str(ROOT / "aicutplan" / "chain" / "qc_visual.py"), "--project", str(pj),
                     "--plan", str(a.qc_per_batch)]):
             return 2
         print("[质检] 会话内按宫格图判定 → verdict_XX.json → qc_visual.py --merge "

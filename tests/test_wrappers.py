@@ -21,10 +21,10 @@ from aicutplan.io import dump_json
 class SingleImplementationTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.CP = importlib.import_module("cutfirst_plan")
-        cls.EF = importlib.import_module("evidence_feed")
-        cls.SE = importlib.import_module("subs_extract")
-        cls.CF = importlib.import_module("cf_pipeline")
+        cls.CP = importlib.import_module("aicutplan.chain.cutfirst_plan")
+        cls.EF = importlib.import_module("aicutplan.shared.evidence_feed")
+        cls.SE = importlib.import_module("aicutplan.chain.subs_extract")
+        cls.CF = importlib.import_module("aicutplan.chain.cf_pipeline")
 
     def test_planning_aliases(self):
         self.assertIs(self.CP._pick_hook_clip, planning.pick_hook_clip)

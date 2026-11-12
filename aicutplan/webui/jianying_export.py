@@ -22,7 +22,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 EXPORTS = ROOT / "exports" / "jianying"
 # 生成草稿要用装了 pyJianYingDraft 的解释器：优先 JY_PYTHON，其次当前解释器，
 # 最后找 WorkBuddy 托管 venv。找到的结果缓存，避免每次请求都跑子进程探测。
@@ -50,7 +50,7 @@ def pick_jy_python() -> Path | None:
     pick = next((c for c in cands if c.is_file() and _py_has_jy(c)), None)
     _JY_PICK["py"] = pick
     return pick
-WORKER = ROOT / "jianying_worker.py"
+WORKER = ROOT / "aicutplan" / "webui" / "jianying_worker.py"
 JY_DIR = Path(os.environ.get("LOCALAPPDATA", "")) / "JianyingPro" / "User Data" / "Projects" / "com.lveditor.draft"
 
 MODES = {

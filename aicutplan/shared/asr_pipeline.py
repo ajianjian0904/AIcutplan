@@ -22,9 +22,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-import narration as NR
+from aicutplan.shared import narration as NR
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 ASR = ROOT / "asr"
 
 SYS = """你是影视台词翻译。把用户给出的 JSON 数组里每一条台词翻译成中文。

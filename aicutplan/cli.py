@@ -28,14 +28,14 @@ from .paths import repo_root, script
 
 #: 子命令 → 仓库根下的阶段脚本
 SCRIPTS = {
-    "run": "cf_pipeline.py",
-    "plan": "cutfirst_plan.py",
-    "subs": "subs_extract.py",
-    "qc": "qc_visual.py",
-    "qc-apply": "qc_loop.py",
-    "serve": "server.py",
-    "narrate": "narrate_cut.py",
-    "parse": "story_parse.py",
+    "run": "aicutplan/chain/cf_pipeline.py",
+    "plan": "aicutplan/chain/cutfirst_plan.py",
+    "subs": "aicutplan/chain/subs_extract.py",
+    "qc": "aicutplan/chain/qc_visual.py",
+    "qc-apply": "aicutplan/chain/qc_loop.py",
+    "serve": "aicutplan/webui/server.py",
+    "narrate": "aicutplan/chain/narrate_cut.py",
+    "parse": "aicutplan/shared/story_parse.py",
 }
 
 # 这些子命令由本包直接实现，不启子进程

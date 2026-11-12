@@ -19,12 +19,12 @@ import json
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 sys.path.insert(0, str(ROOT))
 
-import narration as NR  # noqa: E402
-import story_parse as SP  # noqa: E402
-from smart_align import _load  # noqa: E402
+from aicutplan.shared import narration as NR  # noqa: E402
+from aicutplan.shared import story_parse as SP  # noqa: E402
+from aicutplan.shared.smart_align import _load  # noqa: E402
 
 NARR_SYS = ("你是动漫解说文案写手。画面剪辑已经完成（输出时间轴已定型），你要对着这个时间轴"
             "逐窗口写解说词：每句覆盖指定的连续窗口，字数必须落在该窗口时长的预算内。")
@@ -340,7 +340,7 @@ def _write_outputs(d: Path, items: list[dict], binding: dict[int, list[int]],
 
 
 def _load_shots(proj_dir: Path) -> list[dict]:
-    from smart_align import shots_of
+    from aicutplan.shared.smart_align import shots_of
     return shots_of(proj_dir)
 
 

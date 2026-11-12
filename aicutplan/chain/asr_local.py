@@ -65,7 +65,7 @@ def main() -> int:
         raw = raw if raw.is_absolute() else (d / raw).resolve()
         if raw.exists():
             try:
-                import subs_extract as SE
+                from aicutplan.chain import subs_extract as SE
                 subs = [s for s in SE.probe_subs(raw)
                         if s["codec"] not in SE.IMAGE_CODECS and s["codec"] in SE.TEXT_CODECS]
             except Exception as e:
