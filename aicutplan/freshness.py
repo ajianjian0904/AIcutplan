@@ -264,7 +264,8 @@ def check_stage(project: str | Path, stage: str) -> dict:
             return _row(stage, "stale",
                         "输入已变更：" + "、".join(changed[:4])
                         + (f" 等 {len(changed)} 项" if len(changed) > 4 else ""),
-                        {"cut": "跑 cut.py --force", "tts": "跑 r5_tts.py",
+                        {"cut": "跑 cut.py --force",
+                         "tts": "跑 r5_tts.py --only <句号>，再跑 elastic_fit",
                          "mix": "重跑 r6_mix.py", "mux": "重跑 r7_mux.py"}[stage],
                         "stamp")
         for rel, rec in (st.get("outputs") or {}).items():
