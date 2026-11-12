@@ -187,7 +187,8 @@ AIcutplan/
 
 - **布局**：`<library>/<动漫>/<EPnn>/`，`series.json` 存别名，集目录即工程目录；
   库根 `AICUTPLAN_LIBRARY` > `config/library.json` > `<仓库同级>/漫剪作品库`。
-- **归档**：`snapshot()` 把 `out/03-rapid-narration.mp4` 与关键 JSON 硬链接进
+- **归档**：`snapshot()` 把 `out/03-rapid-narration.mp4`、关键 JSON、全部
+  `tts/*.mp3` 与证据（`shots_desc`/`scene_desc`/`ja-segments`）硬链接进
   `runs/<run_id>/`（跨盘退化复制），`manifest.json` 记录每个产物的 sha1 短指纹
   （大小+首尾 4MB），`latest.json` 记录最新 run 与成片指纹。
 - **指针校验**：`latest(verify=True)` 发现成片缺失/指纹不符**直接报错**，绝不静默

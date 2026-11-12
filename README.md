@@ -116,8 +116,9 @@ python -m aicutplan check --project <pj>
             └── latest.json         # 最新归档指针（含成片指纹）
 ```
 
-**每次生成自动归档**：`aicutplan run` 成功后把成片与关键 JSON 快照进
-`runs/<run_id>/`，写 `manifest.json`（产物指纹 + 输入句子稿 + 来源工程）并更新
+**每次生成自动归档**：`aicutplan run` 成功后把成片、关键 JSON、**全部 `tts/*.mp3`、
+镜头/场景证据与 `ja-segments.json`** 快照进 `runs/<run_id>/`（当前约 65 个产物，
+足以整集回滚重出成片），写 `manifest.json`（产物指纹 + 输入句子稿 + 来源工程）并更新
 `latest.json`。同盘用**硬链接**，后续 ffmpeg 覆盖 `out/` 只换 inode，快照不可变；
 跨盘自动退化为复制。不想归档加 `--no-snapshot`，自定义标签用 `--label v36`。
 

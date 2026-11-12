@@ -5,6 +5,17 @@
 
 ---
 
+## v0.9.3 · 2026-11-13 — 快照补全：整集可回滚（tts + 证据）
+
+- `workspace.ARTIFACT_GLOBS`：`snapshot()` 在原有成片/关键 JSON 之外，追加归档
+  `tts/*.mp3`、`json/shots_desc.json`、`json/scene_desc.json`、`json/ja-segments.json`
+  （保留相对路径，硬链接零拷贝）。单集快照从 8 个产物增至约 65 个，恢复后足以
+  直接重混或重出成片，不必回头找 TTS 与证据文件。
+- EP01 已补一份 `r003_…_v3.5.1-full`（65 产物，`verify` 指纹一致），`latest` 指向它。
+- 新增 1 项测试；全套 204 项全绿。
+
+---
+
 ## v0.9.2 · 2026-11-13 — story_parse 段缓存接内容指纹 + 历史工程脚本统一
 
 **修复**

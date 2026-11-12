@@ -67,6 +67,15 @@ ARTIFACTS: tuple[tuple[str, str], ...] = (
     ("window_table.md", "window_table.md"),
 )
 
+#: 追加归档（整集回滚所需）：按通配符收，保留工程内相对路径。
+#: tts/*.mp3 是重混的唯一音频源；证据 JSON 决定重跑剧情/质检时的输入。
+ARTIFACT_GLOBS: tuple[str, ...] = (
+    "tts/*.mp3",
+    "json/shots_desc.json",
+    "json/scene_desc.json",
+    "json/ja-segments.json",
+)
+
 _BAD_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 
 
@@ -212,6 +221,21 @@ def snapshot(project: str | Path, *, label: str = "", sentences: str | Path | No
             "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
             "sig": quick_sig(src), "mode": mode,
         }
+
+    # 追加：配音与证据文件（保留工程内相对路径，便于整集回滚）
+    for pattern in ARTIFACT_GLOBS:
+        for src in sorted(root.glob(pattern)):
+            if not src.is_file():
+                continue
+            rel = src.relative_to(root).as_posix()
+            dst = run_dir / rel
+            mode = _link_or_copy(src, dst)
+            st = src.stat()
+            artifacts[rel] = {
+                "src": rel, "path": rel, "bytes": st.st_size,
+                "mtime": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                "sig": quick_sig(src), "mode": mode,
+            }
 
     sent_info = None
     if sentences:

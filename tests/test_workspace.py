@@ -80,6 +80,22 @@ class SnapshotTests(_Fixture):
         self.assertEqual(latest["run_id"], m["run_id"])
         self.assertEqual(latest["final_sig"], m["artifacts"]["final.mp4"]["sig"])
 
+    def test_snapshot_includes_tts_and_evidence(self):
+        """整集回滚需要配音与证据：tts/*.mp3、shots_desc 等按相对路径入快照。"""
+        root = self.make_episode()
+        (root / "tts" / "000.mp3").write_bytes(b"audio0")
+        (root / "tts" / "001.mp3").write_bytes(b"audio1")
+        dump_json(root / "json" / "shots_desc.json", {"shots": []})
+        dump_json(root / "json" / "scene_desc.json", {"scenes": []})
+        dump_json(root / "json" / "ja-segments.json", {"segments": []})
+        m = WS.snapshot(root, label="v1")
+        run_dir = root / "runs" / m["run_id"]
+        for rel in ("tts/000.mp3", "tts/001.mp3", "json/shots_desc.json",
+                    "json/scene_desc.json", "json/ja-segments.json"):
+            self.assertIn(rel, m["artifacts"])
+            self.assertTrue((run_dir / rel).exists(), rel)
+        self.assertEqual(WS.verify_run(run_dir), [])
+
     def test_snapshot_requires_final(self):
         root = self.make_episode(final=False)
         with self.assertRaises(FileNotFoundError):
