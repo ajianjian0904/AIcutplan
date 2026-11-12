@@ -41,10 +41,24 @@ def lint_narration(proj_dir: Path) -> list[str]:
     covered: set[int] = set()
     bad: list[str] = []
     prev_end = -1.0
+    al = json.loads((d / "align.json").read_text(encoding="utf-8"))
+    # 用 TTS 实测时长而不是「字数/4.95」粗估：+35% 语速下粗估会明显高估，
+    # 把本来贴合的句子误判成超槽（句34 实测 5.78s / 粗估 7.88s / 槽位 7.42s）。
+    tts_f = d / "tts-result.json"
+    narr_f = d / "narration.json"
+    # lint 跑在 r5_tts / elastic_fit 之前：tts-result 常是上一稿的旧数据，
+    # 拿旧稿时长判新稿会误报。只有 tts-result 不早于 narration 时才算「同稿」。
+    fresh = (tts_f.exists() and narr_f.exists()
+             and tts_f.stat().st_mtime >= narr_f.stat().st_mtime)
+    tts_dur = ({int(x["i"]): float(x.get("tts_dur") or 0)
+                for x in json.loads(tts_f.read_text(encoding="utf-8"))["items"]}
+               if fresh else {})
+    # 粗估「字数/4.95」在 +35% 语速下系统性高估，容差放宽；真实超槽由 elastic_fit 兜底
+    tol = 0.35 if fresh else 0.8
+    # 原声留白窗（hold_hl）本来就不写旁白，不能算「未覆盖」
+    raw_wins = {i for i, w in enumerate(wins)
+                if w.get("tier") == "hold_hl" or w.get("ost_mode") == "original"}
     for it in narr["items"]:
-        swi = None
-        # sent_win_idx 在 align.json
-        al = json.loads((d / "align.json").read_text(encoding="utf-8"))
         swi = al["sent_win_idx"].get(str(it["i"]))
         if not swi:
             bad.append(f"句{it['i']} 无窗口绑定")
@@ -54,14 +68,14 @@ def lint_narration(proj_dir: Path) -> list[str]:
             bad.append(f"句{it['i']} 窗口顺序回跳 ({lo} < {prev_end})")
         prev_end = hi
         slot = wins[hi]["new_end"] - wins[lo]["new_start"]
-        est = len(it["text"]) / 4.95      # 估算净语音
-        if est > slot + 0.35:
-            bad.append(f"句{it['i']} 预估语音 {est:.2f}s > 槽位 {slot:.2f}s（{it['text'][:14]}）")
+        est = tts_dur.get(int(it["i"])) or len(it["text"]) / 4.95
+        if est > slot + tol:
+            bad.append(f"句{it['i']} 语音 {est:.2f}s > 槽位 {slot:.2f}s（{it['text'][:14]}）")
         for x in range(lo, hi + 1):
             if x in covered:
                 bad.append(f"窗口{x} 被重复覆盖")
             covered.add(x)
-    unc = [x for x in range(n_w) if x not in covered]
+    unc = [x for x in range(n_w) if x not in covered and x not in raw_wins]
     if unc:
         bad.append(f"未覆盖窗口 {unc[:10]}{'...' if len(unc) > 10 else ''}")
     return bad
@@ -101,6 +115,8 @@ def main() -> int:
                     help="质检闭环：按改好的句子稿局部重跑失配句（qc_loop --apply）")
     ap.add_argument("--dry-run", action="store_true", help="只打印闭环命令，不执行")
     ap.add_argument("--qc-force", action="store_true", help="闭环文本未变也强制重合成")
+    ap.add_argument("--subs", choices=["auto", "yes", "no"], default="auto",
+                    help="auto=检测并提示 / yes=用内嵌字幕覆盖台词源 / no=不检查")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -115,6 +131,30 @@ def main() -> int:
         if a.qc_force:
             cmd.append("--force")
         return 0 if run(cmd) else 2
+
+    # 台词源预检：MKV 自带文本字幕时无需 ASR（ASR 有幻听且时间戳会漂移）
+    if a.subs != "no":
+        try:
+            cfg = json.loads(pj.read_text(encoding="utf-8"))
+            raw = Path(cfg.get("source_video") or "")
+            raw = raw if raw.is_absolute() else (proj_dir / raw).resolve()
+            seg_f = proj_dir / "json" / "ja-segments.json"
+            marked = False
+            if seg_f.exists():
+                marked = json.loads(seg_f.read_text(encoding="utf-8")).get(
+                    "source") == "embedded-subtitle"
+            import subs_extract as SE
+            avail = raw.exists() and any(
+                s["codec"] in SE.TEXT_CODECS for s in SE.probe_subs(raw))
+            if avail and (a.subs == "yes" or not seg_f.exists()):
+                if run([PY, str(ROOT / "subs_extract.py"), "--project", str(pj),
+                        "--apply", "--refresh-derived", "--video", str(raw)]):
+                    print("[台词源] 已用内嵌字幕，跳过音转字", flush=True)
+            elif avail and not marked:
+                print("[台词源] 源片带文本字幕，但当前 ja-segments 来自 ASR。"
+                      "跑 subs_extract.py --apply 或加 --subs yes 可换成确定性字幕", flush=True)
+        except Exception as e:
+            print(f"[台词源] 预检跳过：{type(e).__name__} {str(e)[:80]}", flush=True)
 
     # 0) 因果图谱（缓存则跳过）
     if not a.skip_plan:

@@ -170,6 +170,28 @@ templates.json       旁白提示词模板
 tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
 ```
 
+## 内嵌字幕优先（跳过音转字）
+
+MKV 常自带 ASS/SRT 字幕轨（有的同时有日文、英文）。**字幕是确定性文本**，比 ASR 转写准：本项目 small 模型出现过「ついほ?」「エンバーターチュー」这类幻听，且 faster-whisper 的段时间戳会漂移 3–16s；字幕还常带「（バリオス）」说话人标注。检测到文本字幕就直接提取，不再跑 ASR。
+
+```bash
+PY=D:/Python312/python.exe
+PJ=<工程目录>/project.json
+
+$PY subs_extract.py --project $PJ                      # 只探测对比，不写文件
+$PY subs_extract.py --project $PJ --apply             # 写回台词源（自动改名备份）
+$PY subs_extract.py --project $PJ --apply --refresh-derived   # 顺带重算 dlg / scene_desc
+$PY subs_extract.py --project $PJ --prefer en         # 改成优先英文字幕
+$PY subs_extract.py --project $PJ --check             # 校验台词源指纹是否过期
+```
+
+- 探测**原始源片**（`project.json` 的 `source_video`），不能用 `out/01-video-no-ad.mp4`——洗片转封装时字幕轨已被丢弃。
+- 选择顺序：排除图像字幕（PGS/DVB，需 OCR）→ 按 `--prefer` 语言优先级 → SRT/WEBVTT 优先于 ASS；ASS 会合并同 `start/end` 的多行（否则一句台词被拆成两条半句）。
+- 产物与现有链路完全兼容：`json/ja-segments.json`（cut 对白映射 / shot_desc.dlg / scene_desc）、`asr_ja.json`（译中与写作表）、`asr/<pkey>/asr_zh.json`。**译中缓存按「±20s 时间窗 + 原文相似度」迁移并补齐条数**，否则 `zh_subtitles` 按索引取译文会整体错行；匹配不上的保留原文标 `translated=false`。
+- 顶层写 `source: embedded-subtitle` 与 `sig`（源片路径+大小+mtime+字幕流序号），`--check` 可发现源片换了但台词源没更新。
+- 集成：`asr_local.py` 检测到文本字幕会自动调用提取器并跳过 faster-whisper（`--force-asr` 可强制走 ASR）；`cf_pipeline.py --subs yes` 在链路开始前替换台词源，默认 `auto` 只提示不改动已定型工程。
+- 时间轴前提：字幕时间是源片原始秒。若 `out/01-video-no-ad.mp4` 与源片**等长**（没裁剪广告）可直接用；若洗片裁过，需要先给字幕加偏移，目前脚本不做自动估计。
+
 ## cut-first：会话内质检闭环（P0-1）
 
 渲染后把「人工看片发现音画错位」变成可重复流程，全程零 DeepSeek API：

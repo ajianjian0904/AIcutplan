@@ -48,11 +48,48 @@ def main() -> int:
     ap.add_argument("--size", default="small",
                     help="tiny / small / medium / large-v3，或本地模型目录")
     ap.add_argument("--force", action="store_true")
+    ap.add_argument("--force-asr", action="store_true",
+                    help="忽略内嵌字幕，强制走 faster-whisper 音转字")
     a = ap.parse_args()
 
     pj_f = Path(a.project).expanduser()
     pj = json.loads(pj_f.read_text(encoding="utf-8"))
     d = pj_f.parent
+
+    # 内嵌字幕优先：必须探测「原始源片」(MKV)，不能用 pick_source() 返回的
+    # out/01-video-no-ad.mp4 —— 洗片转封装时字幕轨已经被丢掉了。
+    if not a.force_asr:
+        raw = Path(pj.get("source_video") or "")
+        raw = raw if raw.is_absolute() else (d / raw).resolve()
+        if raw.exists():
+            try:
+                import subs_extract as SE
+                subs = [s for s in SE.probe_subs(raw)
+                        if s["codec"] not in SE.IMAGE_CODECS and s["codec"] in SE.TEXT_CODECS]
+            except Exception as e:
+                subs = []
+                print(f"[asr] 字幕探测失败（{type(e).__name__}），回退 ASR", flush=True)
+            if subs:
+                seg_f = d / "json" / "ja-segments.json"
+                already = False
+                if seg_f.exists():
+                    try:
+                        already = json.loads(seg_f.read_text(encoding="utf-8")).get(
+                            "source") == "embedded-subtitle"
+                    except Exception:
+                        pass
+                if already and not a.force:
+                    print("[asr] 台词源已是内嵌字幕，跳过音转字（--force 刷新 / --force-asr 强制 ASR）",
+                          flush=True)
+                    return 0
+                cmd = [sys.executable, str(Path(__file__).resolve().parent / "subs_extract.py"),
+                       "--project", str(pj_f), "--apply", "--refresh-derived",
+                       "--video", str(raw)]
+                if subprocess.run(cmd).returncode == 0:
+                    print("[asr] 已用内嵌字幕，跳过 faster-whisper 音转字", flush=True)
+                    return 0
+                print("[asr] 字幕提取失败，回退 faster-whisper", flush=True)
+
     out = d / f"asr_{a.lang}.json"
     if out.exists() and not a.force:
         try:
