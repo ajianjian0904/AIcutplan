@@ -61,6 +61,7 @@ aicutplan/                    Python 包（全部代码按层入包，根目录�
                               relayout_smart make_srt（web 台旧链运行按钮仍调用）
   webui/                      L3 web 校对台：server pipeline sentence_studio review
                               preview_render jianying_export jianying_worker
+config/           仓库级配置（templates.json / tts_calibration.json / llm_config.example.json）
 docs/             架构说明（分层图 / 数据契约 / 缓存事故清单）
 tests/            标准库 unittest 测试（零 ffmpeg / 零网络 / 零模型）
 web/              8 个页面的静态文件（无构建）
@@ -71,6 +72,30 @@ pyproject.toml requirements.txt .gitignore CHANGELOG.md
 `shared` 不得反向 import `chain/webui`（会成环）。所有脚本里的 `ROOT` 一律指仓库根
 （`parents[2]`），运行时数据（`cache/ asr/ drafts/ exports/ studio_state.json`）都落
 在仓库根，与脚本所在层无关。详见 [架构说明 §3](docs/ARCHITECTURE.md)。
+
+---
+
+## 配置
+
+| 文件 | 内容 | 说明 |
+|---|---|---|
+| `config/templates.json` | LLM 提示词模板库（5 套） | web 台「旁白台」可编辑，改动即落盘 |
+| `config/tts_calibration.json` | TTS 语速 / 固定静音校准 | `recalibrate()` 产出，非手改 |
+| `config/llm_config.example.json` | LLM 非密钥配置样例 | 复制为 `config/llm_config.json` 后生效（已忽略） |
+| `config/style.md`（可选） | 文风规则覆盖 | 缺省读 skill 的 `references/style.md` |
+| `studio_state.json` | web 台会话状态（本机） | 运行时数据，不入库 |
+| `<工程目录>/project.json` | **工程级**配置（源片/音色/语速/字幕） | 跟工程走，不在本仓库 |
+
+解析顺序：`AICUTPLAN_CONFIG_DIR` → `config/<name>` → 旧根目录回退 → `config/<name>`（新写入落这里）。
+读取损坏/缺失返回默认值并在 stderr 告警，不会打断流水线；写入走原子写并自动建目录。
+
+环境变量：`AICUTPLAN_CONFIG_DIR`（配置目录）、`AICUTPLAN_STYLE_MD`（文风文件）、
+`DEEPSEEK_BASE_URL` / `DEEPSEEK_MODEL`（覆盖 LLM 地址/模型）、`DEEPSEEK_API_KEY`（**唯一**密钥来源）。
+体检会打印每个配置文件的真实解析路径与状态：
+
+```bash
+python -m aicutplan check --project <pj>
+```
 
 ---
 

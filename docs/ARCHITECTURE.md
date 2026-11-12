@@ -82,6 +82,7 @@ AIcutplan/
 │   ├── subtitles.py               probe_subs / clean_text / parse_srt / merge_same_time / sniff_lang
 │   ├── planning.py                hook_score / pick_hook_clip / weight / reason / is_continuous
 │   ├── evidence.py                load_shots / score_shot / format_shot_line / compact
+│   ├── config.py                  配置目录解析 / 容错读写 / 环境变量覆盖（config/ 优先）
 │   ├── cli.py + __main__.py       L2 门面：python -m aicutplan <cmd>
 │   │
 │   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
@@ -124,11 +125,12 @@ AIcutplan/
 │       ├── jianying_export.py     剪映草稿导出
 │       └── jianying_worker.py     剪映子进程
 │
+├── config/                        仓库级配置（模板 / TTS 校准 / LLM 样例 / 可选 style.md）
 ├── docs/ARCHITECTURE.md           本文件
 ├── tests/                         标准库 unittest（含 test_wrappers 守卫别名唯一实现）
 ├── web/                           8 个页面的静态文件（html / js / css，无构建）
 ├── pyproject.toml / requirements.txt / .gitignore / CHANGELOG.md / start.bat
-├── templates.json / tts_calibration.json / llm_config.json（配置，忽略或本机）
+├── studio_state.json（web 台状态，本机忽略）
 └── cache/ asr/ drafts/ exports/ studio_state.json   运行时数据（.gitignore）
 ```
 
@@ -174,6 +176,13 @@ AIcutplan/
 
 工程根 = `project.json` 所在目录（**与仓库根无关**）。完整路径表见
 `aicutplan/paths.py::ProjectPaths`。
+
+### 配置解析（`aicutplan/config.py`）
+
+仓库级配置统一在 `config/`：`templates.json`（提示词模板）、`tts_calibration.json`（TTS 校准）、
+`llm_config.json`（非密钥 LLM 配置，忽略）。解析顺序：`AICUTPLAN_CONFIG_DIR` 环境变量 →
+`config/<name>` → 旧根目录同名文件回退 → `config/<name>`（新写入落这里）。读取失败降级为默认值，
+写入用 `io.dump_json` 原子写并自动建目录。密钥只认 `DEEPSEEK_API_KEY`，不落文件。
 
 | 产物 | 关键字段 | 写入方 | 主要读取方 |
 |---|---|---|---|

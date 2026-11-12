@@ -83,6 +83,13 @@ def _check(project: str | Path, *, lint_only: bool = False) -> int:
 
     print(format_issues(issues, title="工程体检"))
     if not lint_only:
+        from . import config as CFG
+        print(f"配置目录: {CFG.config_dir()}")
+        for r in CFG.summary():
+            tag = "OK" if r["exists"] else "缺省"
+            if r["legacy"]:
+                tag += "（旧根目录，建议迁 config/）"
+            print(f"  {r['name']:<24} {tag:<10} {r['bytes']:>6}B  {r['note']}")
         q = summarize_quality(p.root)
         print("指标: " + "  ".join(f"{k}={v}" for k, v in q.items()))
     return 0 if not issues else 1

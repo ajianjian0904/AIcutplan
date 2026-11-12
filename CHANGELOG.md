@@ -5,6 +5,27 @@
 
 ---
 
+## v0.7.1 · 2026-11-12 — 配置收口：config/ 目录 + L0 配置层
+
+**结构**
+- 新增 `config/` 仓库级配置目录：`templates.json`、`tts_calibration.json` 从仓库根迁入，
+  新增 `llm_config.example.json` 与 `config/README.md`（文件清单 / 解析顺序 / 环境变量 / 迁移说明）。
+- 新增 `aicutplan/config.py`（L0）：`config_dir`（`AICUTPLAN_CONFIG_DIR` 覆盖）/
+  `config_file`（config/ 优先、旧根目录只读回退）/ `load_config`（缺失或损坏降级 + 告警）/
+  `save_config`（原子写 + 自动建目录）/ `summary`（体检用）。
+- `narration.py` 的模板、TTS 校准、LLM 配置读写全部改走配置层；文风文件从硬编码本机路径
+  改为 `AICUTPLAN_STYLE_MD` > `config/style.md` > 历史 skill 路径。
+- `python -m aicutplan check` 新增配置体检：打印每个配置文件的真实解析路径、大小、
+  是否仍在读旧根目录文件。
+- `.gitignore` 只忽略 `config/llm_config.json`（其余配置入库）；密钥仍只认环境变量。
+
+**验证**
+- 新增 `tests/test_config.py` 17 项：默认目录 / 环境变量覆盖 / config 优先 / 旧路径回退 /
+  缺失与损坏降级 / 原子写与建目录 / summary 标记 / narration 四项集成。
+- 全套测试 139 项全绿；ep01cf 体检全过；web 台模板与校准接口改为读新目录后正常。
+
+---
+
 ## v0.7.0 · 2026-11-12 — 目录分层：全部脚本按层入包
 
 **结构**

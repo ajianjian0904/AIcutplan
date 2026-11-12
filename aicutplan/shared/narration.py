@@ -25,10 +25,25 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]  # 仓库根（aicutplan/<子包>/x.py → 上两级）
 DRAFTS = ROOT / "drafts"
-TEMPLATES_FILE = ROOT / "templates.json"
-CALIB_FILE = ROOT / "tts_calibration.json"
-LLM_CONFIG_FILE = ROOT / "llm_config.json"
-STYLE_MD = Path(r"C:/Users/10451/.workbuddy/skills/anime-recap/references/style.md")
+
+from aicutplan import config as CFG   # noqa: E402  L0 配置层：位置解析 + 容错读写
+
+# 配置路径统一由 aicutplan.config 解析：config/ 优先 → 旧根目录回退 →
+# 都不存在时指向 config/（新写入落这里）。可用 AICUTPLAN_CONFIG_DIR 覆盖目录。
+TEMPLATES_FILE = CFG.templates_file()
+CALIB_FILE = CFG.calibration_file()
+LLM_CONFIG_FILE = CFG.llm_config_file()
+
+
+def _style_md() -> Path:
+    """文风参考文件：AICUTPLAN_STYLE_MD > config/style.md > 历史 skill 路径（本机）。"""
+    env = os.environ.get("AICUTPLAN_STYLE_MD")
+    if env:
+        return Path(env).expanduser()
+    p = CFG.config_dir() / "style.md"
+    if p.exists():
+        return p
+    return Path(r"C:/Users/10451/.workbuddy/skills/anime-recap/references/style.md")
 
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
@@ -116,10 +131,10 @@ def _write(p: Path, obj):
 
 # ---------------------------------------------------------------- 模板
 def templates() -> list:
-    saved = _read(TEMPLATES_FILE, None)
+    saved = CFG.load_config("templates.json", None)
     if saved is None:
         saved = [dict(t) for t in BUILTIN_TEMPLATES]
-        _write(TEMPLATES_FILE, saved)
+        CFG.save_config("templates.json", saved)
     return saved
 
 
@@ -142,7 +157,7 @@ def save_template(tpl: dict) -> list:
             break
     else:
         items.append(tpl)
-    _write(TEMPLATES_FILE, items)
+    CFG.save_config("templates.json", items)
     return items
 
 
@@ -155,7 +170,7 @@ def get_template(tid: str) -> dict:
 
 # ---------------------------------------------------------------- 标定
 def calibration() -> dict:
-    c = _read(CALIB_FILE, None)
+    c = CFG.load_config("tts_calibration.json", None)
     if c:
         return c
     return {"effective_cps": 4.955, "fixed_silence": 0.733,
@@ -184,7 +199,7 @@ def recalibrate(proj) -> dict:
         "sentences": n, "chars": C, "speech_sec": round(T, 2),
         "source": str(f), "calibrated_at": datetime.now().isoformat(timespec="seconds"),
     }
-    _write(CALIB_FILE, out)
+    CFG.save_config("tts_calibration.json", out)
     return out
 
 
@@ -288,8 +303,9 @@ def restore_snapshot(proj, name: str) -> dict:
 
 # ---------------------------------------------------------------- 上下文
 def style_rules() -> str:
-    if STYLE_MD.exists():
-        return STYLE_MD.read_text(encoding="utf-8")[:9000]
+    p = _style_md()
+    if p.exists():
+        return p.read_text(encoding="utf-8")[:9000]
     return "11 字一句，一句一个信息点；每 4–5 秒一个转折词；每 19–29 秒一个反转词；主角不报名字；开场先给超规格结果。"
 
 
@@ -436,7 +452,7 @@ def render(tpl: dict, v: dict) -> dict:
 
 # ---------------------------------------------------------------- DeepSeek
 def llm_config() -> dict:
-    c = _read(LLM_CONFIG_FILE, {})
+    c = CFG.load_config("llm_config.json", {})
     return {
         "base_url": os.environ.get("DEEPSEEK_BASE_URL") or c.get("base_url") or DEFAULT_BASE_URL,
         "model": os.environ.get("DEEPSEEK_MODEL") or c.get("model") or DEFAULT_MODEL,
@@ -447,11 +463,11 @@ def llm_config() -> dict:
 
 
 def save_llm_config(d: dict) -> dict:
-    c = _read(LLM_CONFIG_FILE, {})
+    c = CFG.load_config("llm_config.json", {})
     for k in ("base_url", "model", "temperature"):
         if k in d:
             c[k] = d[k]
-    _write(LLM_CONFIG_FILE, c)
+    CFG.save_config("llm_config.json", c)
     return llm_config()
 
 
