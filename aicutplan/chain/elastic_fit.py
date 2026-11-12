@@ -50,7 +50,17 @@ def trimmed_speech_dur(ffmpeg: str, p: Path) -> float:
     """解码 + 按振幅裁剪后的净语音时长（edge-tts 首尾静音随句长浮动，常数估算会失真）。"""
     argv = [ffmpeg, "-v", "error", "-i", str(p), "-vn", "-ac", "1", "-ar", "8000",
             "-f", "s16le", "-"]
-    raw = subprocess.run(argv, capture_output=True, timeout=120).stdout
+    # 并行渲染时 ffmpeg 偶发被系统调度卡住；重试一次再交给调用方按估算兜底，
+    # 不让单个 mp3 的瞬时超时打断整条无人值守链。
+    for attempt in range(2):
+        try:
+            raw = subprocess.run(argv, capture_output=True, timeout=45).stdout
+            break
+        except subprocess.TimeoutExpired:
+            if attempt:
+                raise
+            import time as _time
+            _time.sleep(0.5)
     import array
     a = array.array("h")
     a.frombytes(raw[: len(raw) // 2 * 2])
@@ -103,7 +113,12 @@ def main() -> int:
             continue
         slot = wins[hi]["new_end"] - wins[lo]["new_start"] + 0.15   # 少量呼吸宽限
         mp3 = ctx.p("tts", f"{i:03d}.mp3")
-        speech = trimmed_speech_dur(ff, mp3) if mp3.exists() else max(0.0, r["tts_dur"] - SILENCE)
+        fallback = max(0.0, r["tts_dur"] - SILENCE)
+        try:
+            speech = trimmed_speech_dur(ff, mp3) if mp3.exists() else fallback
+        except subprocess.TimeoutExpired:
+            print(f"[弹性对齐] 句 {i} 解码超时，改用估算净语音 {fallback:.2f}s", flush=True)
+            speech = fallback
         ratio = speech / slot if slot > 0.1 else 1.0
         row = {"i": i, "slot": round(slot, 2), "speech": round(speech, 2),
                "ratio": round(ratio, 2), "action": "ok"}
@@ -134,7 +149,11 @@ def main() -> int:
                     else:
                         tmp.replace(mp3)
                         if ratio2 > 1.0:
-                            atempo_file(ff, mp3, min(ratio2, MAX_TEMPO), mp3)
+                            # ffmpeg 不允许输入/输出同一路径（会报
+                            # "same as Input #0 - exiting"），必须经临时文件中转。
+                            tmp2 = _tmp()
+                            atempo_file(ff, mp3, min(ratio2, MAX_TEMPO), tmp2)
+                            tmp2.replace(mp3)
                     row["action"] = f"resyn{faster}"
                     fixed_resyn.append(i)
                     tts[i]["tts_dur"] = round(ffprobe_dur(ctx.ffprobe, mp3), 3)
@@ -147,6 +166,14 @@ def main() -> int:
                 row["action"] = "OVER"
                 over_list.append(i)
         report.append(row)
+
+    # atempo 压回 / 加速重合成都会改写 mp3，必须同步回写内容指纹；
+    # 否则渲染门禁会判「音频与 tts-result 不符」并阻断（EP02 句7 真实触发过）。
+    from aicutplan.workspace import quick_sig
+    for k, item in tts.items():
+        f = ctx.p("tts", f"{int(k):03d}.mp3")
+        if f.exists():
+            item["mp3_sig"] = quick_sig(f)
 
     (d / "tts-result.json").write_text(json.dumps(
         {"voice": voice, "rate": base_rate, "items": [tts[k] for k in sorted(tts)]},
