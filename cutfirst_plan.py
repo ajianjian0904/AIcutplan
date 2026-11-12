@@ -29,9 +29,12 @@ from smart_align import shots_of, _load  # noqa: E402
 
 LEAD = 0.10
 MIN_SHOT, MAX_SHOT = 0.8, 3.5
-HOOK_SHOT_MIN, HOOK_SHOT_MAX = 0.6, 1.2   # 钩子块强制快切（博主：开场 30s 中位 0.97s）
-HOOK_SHOTS_N = 10                         # 高潮画面前置的镜头数
-HOOK_USED_RATIO = 1.0                     # 钩子块预算全部用于前置高潮（整块快切）
+HOOK_SHOT_MIN, HOOK_SHOT_MAX = 0.6, 1.2   # 连续段内部按此长度切窗口（播放时无缝）
+HOOK_SHOTS_N = 10                         # 钩子块预算的窗口数上限
+HOOK_USED_RATIO = 1.0                     # 钩子块预算全部用于前置爽点
+# 钩子 = 剪辑规划阶段锁定的「源片连续、未经裁切重排」的一段爽点。
+# 不是全球散装检索镜头、不按设定/动作重排、不跳源片时间线；
+# 这段画面是「提前复用」，正片里必须原样再演一遍，所以钩子镜头不进 used。
 CLIFFHANGER_SEC = 12.0                    # 末块结尾原声留白时长
 
 # 叙事权重：因果图谱 func 优先，缺省用事件 type
@@ -39,8 +42,8 @@ FUNC_W = {"钩子": 3.0, "爆发": 3.0, "反转": 2.6, "升级": 1.8, "收束": 
 TYPE_W = {"钩子": 3.0, "反转": 2.6, "爽点": 2.6, "冲突": 1.8, "收尾": 1.3, "铺垫": 1.0}
 
 # 高潮前置选镜打分：depth/desc 关键词命中 + 事件类型
-HOOK_KW_A = ("强化", "紫光", "点数", "数字", "球", "一万", "十三万")   # 设定类画面（先放）
-HOOK_KW_B = ("弹飞", "轰", "挥剑", "拳", "砸", "坑", "惊", "惨叫")     # 动作类画面（后放）
+HOOK_KW_A = ("强化", "紫光", "点数", "数字", "球", "一万", "一万三千")  # 设定类画面
+HOOK_KW_B = ("弹飞", "轰", "挥剑", "拳", "砸", "坑", "惊", "惨叫")     # 动作类画面（爽点密度更高）
 
 
 def _hook_score(sh: dict, e: dict) -> float:
@@ -57,27 +60,49 @@ def _hook_score(sh: dict, e: dict) -> float:
     return s
 
 
-def _pick_hook_shots(shots: list[dict], events: list[dict], used: set) -> list[dict]:
-    """全球检索最爽的镜头做开场钩子（无视时间线）。返回按叙事顺序排列。"""
-    cands = []
-    for sh in shots:
-        if sh["i"] in used or sh["b"] - sh["a"] < HOOK_SHOT_MIN:
-            continue
+def _pick_hook_clip(shots: list[dict], events: list[dict], budget: float,
+                    override: list | None = None) -> tuple[float, float, int | None]:
+    """锁定开场钩子 = 源片里连续、未经裁切重排的一整段爽点。
+
+    与旧的「全球散装检索」相反：在镜头序列上滑动一个 budget 长度的窗口，
+    取单位时间爽点密度最高的一段，返回 (起点, 终点, 主事件)。
+    不挑镜头、不按设定/动作重排、不跳时间线 —— 播出来就是原片那一整段。
+    override = [a, b] 时直接采用规划阶段人工/事件表锁定的区间。
+    """
+    if override and len(override) == 2 and float(override[1]) > float(override[0]):
+        a, z = float(override[0]), float(override[1])
         gi = next((i for i, e in enumerate(events)
-                   if float(e.get("t0", 0)) <= sh["a"] < float(e.get("t1", 0))), None)
-        e = events[gi] if gi is not None else {}
-        sc = _hook_score(sh, e)
-        if sc >= 3.0:
-            cands.append((sc, sh, gi))
-    cands.sort(key=lambda x: -x[0])
-    top = cands[:HOOK_SHOTS_N]
-    # 叙事顺序：设定类（紫光/点数）在前，动作类（弹飞/轰）在后
-    def order(item):
-        _, sh, _ = item
-        txt = f"{sh.get('depth', '')}{sh.get('desc', '')}"
-        return 0 if any(k in txt for k in HOOK_KW_A) and not any(k in txt for k in HOOK_KW_B) else 1
-    top.sort(key=lambda x: (order(x), -x[0]))
-    return [(sh, gi) for _, sh, gi in top]
+                   if float(e.get("t0", 0)) <= a < float(e.get("t1", 0))), None)
+        return a, z, gi
+
+    best = None
+    last_b = float(shots[-1]["b"]) if shots else 0.0
+    for k, sh in enumerate(shots):
+        a = float(sh["a"]) + LEAD
+        z = a + budget
+        if z > last_b:
+            break
+        score, votes = 0.0, {}
+        for s2 in shots[k:]:
+            if float(s2["a"]) >= z:
+                break
+            lo, hi = max(a, float(s2["a"])), min(z, float(s2["b"]))
+            if hi <= lo:
+                continue
+            gi = next((i for i, e in enumerate(events)
+                       if float(e.get("t0", 0)) <= s2["a"] < float(e.get("t1", 0))), None)
+            e = events[gi] if gi is not None else {}
+            w = _hook_score(s2, e)
+            score += w * (hi - lo)
+            if w >= 3.0 and gi is not None:
+                votes[gi] = votes.get(gi, 0.0) + (hi - lo)
+        cand = (score / max(budget, 0.1), a, z,
+                max(votes, key=votes.get) if votes else None)
+        if best is None or cand[0] > best[0]:
+            best = cand
+    if best is None:
+        return 0.0, 0.0, None
+    return best[1], best[2], best[3]
 
 
 def _weight(e: dict, causal: dict, gi: int) -> float:
@@ -180,18 +205,25 @@ def align_plan(proj_dir: Path) -> dict:
         if not ev_in:
             continue
         target = bl["target"]
-        # ---- 钩子块：高潮画面前置 + 强制快切（博主开场结构）----
+        # ---- 钩子块：规划阶段锁定的「连续未裁切爽点段」整段前置 ----
         if bi == 0 and bl.get("type") == "钩子":
             hook_budget = min(target * HOOK_USED_RATIO, HOOK_SHOTS_N * HOOK_SHOT_MAX)
-            hook_used = 0.0
-            for sh, gi in _pick_hook_shots(shots, events, used):
-                if hook_used >= hook_budget - 0.3:
-                    break
-                dur = min(HOOK_SHOT_MAX, max(HOOK_SHOT_MIN, sh["b"] - sh["a"]))
-                used.add(sh["i"])
-                emit(sh["a"] + LEAD, dur, gi, bi)
-                hook_used += dur
-            target = max(4.0, target - hook_used)
+            pj = proj_dir / "project.json"
+            cfg = _load(pj) if pj.exists() else {}
+            override = (cfg.get("recap") or {}).get("hook_clip")
+            a, z, gi = _pick_hook_clip(shots, events, hook_budget, override)
+            if z > a:
+                cur, left = a, z - a
+                while left > 0.05:
+                    dur = min(HOOK_SHOT_MAX, max(HOOK_SHOT_MIN, left))
+                    if left - dur < HOOK_SHOT_MIN:   # 余量不足一窗就并进最后一窗
+                        dur = left
+                    emit(cur, dur, gi if gi is not None else 0, bi)
+                    new_wins[-1]["reason"] = f"前置爽点·连续未裁切 {a:.2f}-{z:.2f}s"
+                    cur += dur
+                    left -= dur
+                # 不标 used：钩子是「提前复用」，正片里这段必须原样再演一遍
+                target = max(4.0, target - (z - a))
         # 预算按权重分配；爆发事件（爽点核心）最少 5s——高潮需要整段演出；
         # 其余单事件最少 1.6s，超出预算池的截断
         weights = {gi: _weight(events[gi], causal, gi) for gi in ev_in}

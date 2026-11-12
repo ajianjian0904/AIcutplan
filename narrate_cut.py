@@ -127,17 +127,44 @@ def export_table(proj_dir: Path, rate: float) -> Path:
     out = ["# 会话内导演·旁白写作输入表", "",
            f"共 {len(wins)} 窗 / {len(blocks)} 块。TTS 语速 {rate} 字/秒，预算=窗口时长×4.7 已标注。",
            "每行：窗口号 | 成片秒(时长≈字数预算) | 画面 | 台词 | 深层 | 帧事实 | 关键词。",
+           "例外：钩子块是剪辑规划锁定的连续爽点，只列旁白槽位，不列画面证据（不参与写作）。",
            "写作契约：叙述流可一句跨多窗（≤6）；【原声留白】窗口不写句；句长贴预算±1 字。", ""]
     for bi in sorted(beat_wins):
         wids = beat_wins[bi]
         bl = blocks[bi] if bi < len(blocks) else {}
+        out.append(f"## 块{bi} {bl.get('label', '')}（{bl.get('type', '')}）")
+
+        # 钩子的画面由「剪辑规划」阶段锁定为一段源片连续未裁切的爽点，
+        # 不属于旁白写作对象：这里只给槽位，不列画面/台词/帧事实/因果，
+        # 避免写作者按逐窗画面去改写钩子（旧版就是把散装检索结果混进了写作表）。
+        hook_wids = [wi for wi in wids
+                     if str(wins[wi].get("reason", "")).startswith("前置爽点·连续")]
+        if hook_wids:
+            hs = set(hook_wids)
+            a = min(wins[wi]["src_start"] for wi in hook_wids)
+            z = max(wins[wi]["src_end"] for wi in hook_wids)
+            out.append(f"> **前置爽点（剪辑规划锁定 · 不参与本表写作）**：源片连续未裁切 "
+                       f"{a:.2f}–{z:.2f}s，共 {len(hook_wids)} 窗 / {z - a:.2f}s；"
+                       "不挑镜头、不跳时间线、不重排，正片仍完整复用该段。以下仅为旁白槽位。")
+            for wi in hook_wids:
+                w = wins[wi]
+                raw = w.get("tier") == "hold_hl" or w.get("ost_mode") == "original"
+                out.append(f"窗口{wi} | 成片 {w['new_start']:.1f}-{w['new_end']:.1f}s "
+                           f"({w['dur']:.2f}s, 预算≈{int(w['dur'] * 4.7)}字)"
+                           + (" | 【原声留白·不写句】" if raw else ""))
+            rest = [wi for wi in wids if wi not in hs]
+            if rest:
+                out.extend(build_wins_lines(wins, wmeta, rest[0], rest[-1],
+                                            shots, scene, events, evidence=True))
+            out.append("")
+            continue
+
         cs = []
         for wi in wids:
             c = causal.get(str(wmeta[wi]["ev"])) or {}
             if c.get("func") or c.get("cause") or c.get("result"):
                 cs.append(f"事件{wmeta[wi]['ev']}[{c.get('func', '-')}]: "
                           f"起因←{c.get('cause', [])} 结果→{c.get('result', [])}")
-        out.append(f"## 块{bi} {bl.get('label', '')}（{bl.get('type', '')}）")
         if cs:
             out.append(f"因果：{'；'.join(cs[:8])}")
         out.extend(build_wins_lines(wins, wmeta, wids[0], wids[-1],
