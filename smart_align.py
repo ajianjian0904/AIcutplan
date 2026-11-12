@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 共享库] 职责：句级事件对齐 + shots_of/_load ｜ 调用者：cutfirst_plan; narrate_cut; align_chain ｜ 产物：库（勿按旧检索腿归档）
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """句级事件对齐：旁白句子 → 剧情 → 事件 → 画面，替代 n3 的块级均匀铺刀。
 
 n3_align 的问题：它在**块级别**把 k = T/1.32 刀均匀铺满块源区间（step 均分），

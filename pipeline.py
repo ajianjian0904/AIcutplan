@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：web 台 17 步定义 / 环境体检 ｜ 调用者：server ｜ 产物：STEPS / doctor
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """制作流水线 · 步骤定义 / 环境体检 / 后台任务执行器
 
 设计要点：

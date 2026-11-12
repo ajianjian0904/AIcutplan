@@ -21,3 +21,19 @@ llm_config.json
 *.log
 .DS_Store
 Thumbs.db
+
+# 打包 / 测试 / 类型检查产物
+build/
+dist/
+*.egg-info/
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.tox/
+
+# 编辑器与临时重构文件
+*.bak
+*.tmp
+.idea/
+.vscode/

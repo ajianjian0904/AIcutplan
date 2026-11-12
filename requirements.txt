@@ -1,0 +1,32 @@
+# AIcutplan 运行依赖
+#
+# 核心（aicutplan.* L0 基础层 / 一键 CLI / 单元测试 / web 校对台）零第三方依赖：
+#   python -m aicutplan check --project <project.json>
+#   python -m unittest discover -s tests -v
+# 只需要 Python >= 3.10 + ffmpeg/ffprobe（可用 AICUTPLAN_FFMPEG 指定路径）。
+#
+# 以下按用途分组，按注释行前的 `# ` 决定是否安装；也可直接用 extras：
+#   pip install -e ".[tts,vision]"        # 出成片（不含 ASR）
+#   pip install -e ".[full]"              # 含无字幕回退的本地转写
+# ---------------------------------------------------------------------------
+
+# --- TTS：旁白合成 + 弹性对齐（r5_tts.py / elastic_fit.py）---
+# edge-tts>=7.3
+
+# --- 视觉：会话内质检宫格图（qc_visual.py）---
+# Pillow>=9.0
+
+# --- ASR：仅当源片没有内嵌文本字幕时才需要 ---
+# faster-whisper>=1.0
+# numpy>=1.24
+
+# --- 可选：剪映草稿导出（jianying_worker.py 在独立 venv 里跑）---
+# pyJianYingDraft==0.3.1
+
+# --- 可选：LLM 自主写作 / 台词译中（会话内模式完全不需要）---
+# 只需环境变量 DEEPSEEK_API_KEY，无 pip 依赖
+
+# 说明：本机实际使用两个解释器，见 README「解释器口径」：
+#   D:/Python312/python.exe                             规划/渲染/测试（有 torch）
+#   C:/Users/10451/.workbuddy/binaries/python/envs/default/Scripts/python.exe
+#                                                      TTS/ASR（有 edge_tts / faster_whisper）

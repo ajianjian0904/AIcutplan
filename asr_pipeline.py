@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 共享库] 职责：ASR 台词译中缓存 / 断点续传 ｜ 调用者：server; sentence_studio; story_parse ｜ 产物：asr/<pkey>/asr_zh.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """素材解析 · 多语 ASR → 中文台词时间轴（第一版）
 
 输入：工程目录的 asr_ja.json / asr_en.json / asr.json（段级 {t0,t1,text}）

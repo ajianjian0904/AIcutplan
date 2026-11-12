@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 旧链] 职责：旧句级重排（新链由 elastic_fit 取代） ｜ 调用者：pipeline ｜ 产物：narration.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """cut.py 之后重建 narration.json（r6 混音读这份）—— 句级精确版。
 
 旧 relayout_narr 按 beat 跨度等比铺句，句子音频只是"大致"落在自己的画面上。

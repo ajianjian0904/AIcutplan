@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：画面先定（连续爽点钩子 + 权重选窗） ｜ 调用者：cf_pipeline:2 ｜ 产物：json/cutplan.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """Cut-first 阶段一：画面先定（cut-first / narrate-second）。
 
 旧路径是"旁白定稿 → TTS → 用语音时长裁画面"，语义匹配从起点就是被动妥协。
@@ -37,94 +39,16 @@ HOOK_USED_RATIO = 1.0                     # 钩子块预算全部用于前置爽
 # 这段画面是「提前复用」，正片里必须原样再演一遍，所以钩子镜头不进 used。
 CLIFFHANGER_SEC = 12.0                    # 末块结尾原声留白时长
 
-# 叙事权重：因果图谱 func 优先，缺省用事件 type
-FUNC_W = {"钩子": 3.0, "爆发": 3.0, "反转": 2.6, "升级": 1.8, "收束": 1.3, "铺垫": 1.0}
-TYPE_W = {"钩子": 3.0, "反转": 2.6, "爽点": 2.6, "冲突": 1.8, "收尾": 1.3, "铺垫": 1.0}
+# ---- 规划领域纯函数统一走 L0 基础层（aicutplan.planning）------------------
+# 这里只保留编排逻辑；打分/选段/权重/理由的唯一实现在包内，便于脱离工程单测。
+# 硬约束（钩子必须是源片连续未裁切爽点）写在包的模块 docstring 里。
+from aicutplan import planning as PL       # noqa: E402
 
-# 高潮前置选镜打分：depth/desc 关键词命中 + 事件类型
-HOOK_KW_A = ("强化", "紫光", "点数", "数字", "球", "一万", "一万三千")  # 设定类画面
-HOOK_KW_B = ("弹飞", "轰", "挥剑", "拳", "砸", "坑", "惊", "惨叫")     # 动作类画面（爽点密度更高）
-
-
-def _hook_score(sh: dict, e: dict) -> float:
-    txt = f"{sh.get('depth', '')}{sh.get('desc', '')}{sh.get('obj', '')}"
-    s = 0.0
-    if any(k in txt for k in HOOK_KW_A):
-        s += 2.0
-    if any(k in txt for k in HOOK_KW_B):
-        s += 3.0
-    if e.get("type") == "爽点":
-        s += 1.5
-    if sh.get("b", 0) - sh.get("a", 0) > 6:   # 超长镜不适合快切钩子
-        s -= 2.0
-    return s
-
-
-def _pick_hook_clip(shots: list[dict], events: list[dict], budget: float,
-                    override: list | None = None) -> tuple[float, float, int | None]:
-    """锁定开场钩子 = 源片里连续、未经裁切重排的一整段爽点。
-
-    与旧的「全球散装检索」相反：在镜头序列上滑动一个 budget 长度的窗口，
-    取单位时间爽点密度最高的一段，返回 (起点, 终点, 主事件)。
-    不挑镜头、不按设定/动作重排、不跳时间线 —— 播出来就是原片那一整段。
-    override = [a, b] 时直接采用规划阶段人工/事件表锁定的区间。
-    """
-    if override and len(override) == 2 and float(override[1]) > float(override[0]):
-        a, z = float(override[0]), float(override[1])
-        gi = next((i for i, e in enumerate(events)
-                   if float(e.get("t0", 0)) <= a < float(e.get("t1", 0))), None)
-        return a, z, gi
-
-    best = None
-    last_b = float(shots[-1]["b"]) if shots else 0.0
-    for k, sh in enumerate(shots):
-        a = float(sh["a"]) + LEAD
-        z = a + budget
-        if z > last_b:
-            break
-        score, votes = 0.0, {}
-        for s2 in shots[k:]:
-            if float(s2["a"]) >= z:
-                break
-            lo, hi = max(a, float(s2["a"])), min(z, float(s2["b"]))
-            if hi <= lo:
-                continue
-            gi = next((i for i, e in enumerate(events)
-                       if float(e.get("t0", 0)) <= s2["a"] < float(e.get("t1", 0))), None)
-            e = events[gi] if gi is not None else {}
-            w = _hook_score(s2, e)
-            score += w * (hi - lo)
-            if w >= 3.0 and gi is not None:
-                votes[gi] = votes.get(gi, 0.0) + (hi - lo)
-        cand = (score / max(budget, 0.1), a, z,
-                max(votes, key=votes.get) if votes else None)
-        if best is None or cand[0] > best[0]:
-            best = cand
-    if best is None:
-        return 0.0, 0.0, None
-    return best[1], best[2], best[3]
-
-
-def _weight(e: dict, causal: dict, gi: int) -> float:
-    c = causal.get(str(gi)) or {}
-    w = FUNC_W.get(c.get("func", ""), None)
-    if w is None:
-        w = TYPE_W.get(e.get("type", ""), 1.0)
-    # 有因果连接的事件更可能是结构节点
-    if c.get("cause") or c.get("result"):
-        w *= 1.15
-    return w
-
-
-def _reason(e: dict, causal: dict, gi: int) -> str:
-    """窗口保留理由（clip_plan 契约：旁白写作与人工抽查的依据）。"""
-    c = causal.get(str(gi)) or {}
-    func = c.get("func") or e.get("type", "")
-    ev = e.get("event", "")[:30]
-    link = ""
-    if c.get("cause"):
-        link = f"（承接事件{c['cause'][0]}）"
-    return f"{func}节点{link}：{ev}"
+_hook_score = PL.hook_score
+_pick_hook_clip = PL.pick_hook_clip
+_weight = PL.weight
+_reason = PL.reason
+is_continuous = PL.is_continuous          # 供 --check / 验收钩子段是否真的连续
 
 
 def align_plan(proj_dir: Path) -> dict:

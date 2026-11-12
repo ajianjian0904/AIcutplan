@@ -1,0 +1,54 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aicutplan"
+version = "0.6.0"
+description = "动漫速讲（漫剪）自动剪辑与逐句校对流水线：cut-first 画面先定 + 会话内导演 + 生成后质检闭环"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "AIcutplan contributors" }]
+keywords = ["anime", "video-editing", "ffmpeg", "tts", "cut-first"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: Microsoft :: Windows",
+    "Topic :: Multimedia :: Video",
+]
+
+# L0 基础层与单元测试只用标准库，故核心依赖为空。
+dependencies = []
+
+[project.optional-dependencies]
+# 旁白合成（r5_tts.py / elastic_fit.py）；edge-tts>=7.3 需显式 boundary="WordBoundary"
+tts = ["edge-tts>=7.3"]
+# 质检宫格图（qc_visual.py）
+vision = ["Pillow>=9.0"]
+# 无内嵌字幕时回退的本地转写（asr_local.py）
+asr = ["faster-whisper>=1.0", "numpy>=1.24"]
+# 运行完整成片链路所需
+full = ["edge-tts>=7.3", "Pillow>=9.0", "faster-whisper>=1.0", "numpy>=1.24"]
+# 单元测试用标准库 unittest 即可；pytest 只是可选的运行器
+dev = ["pytest>=7.0"]
+
+[project.scripts]
+aicutplan = "aicutplan.cli:main"
+
+[project.urls]
+Repository = "https://github.com/ajianjian0904/AIcutplan"
+
+[tool.setuptools]
+# 阶段脚本保持在根目录（见 docs/ARCHITECTURE.md「设计约束」），只把 L0 基础层打包
+packages = ["aicutplan"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+addopts = "-q"
+
+[tool.unittest]
+# 标准库零依赖运行方式：D:/Python312/python.exe -m unittest discover -s tests -v

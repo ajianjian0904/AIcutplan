@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 旧链] 职责：洗片去广告/转封装 ｜ 调用者：pipeline:1 ｜ 产物：out/01-video-no-ad.mp4
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """洗片：源片 → out/01-video-no-ad.mp4 + audio/base-no-ad.wav + metrics.json
 
 只做「流复制 + 抽音 + 探针」，不重编码，几秒到几十秒完成。

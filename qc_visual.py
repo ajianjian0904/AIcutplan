@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：会话内逐句质检 plan/merge/probe ｜ 调用者：cf_pipeline --qc ｜ 产物：qc_visual/qc_rewrite.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """渲染后质检（会话内版）：成片逐句抽帧 → 会话内读图判「旁白说的 vs 画面演的」。
 
 P0-1 闭环第一步。原版把帧 base64 发给 DeepSeek VLM，与「零 DeepSeek」目标冲突
@@ -21,12 +23,16 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 from PIL import Image, ImageDraw, ImageStat
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+from aicutplan.media import ffmpeg_bin   # noqa: E402  L0 统一实现
 
 QC_CRITERIA = """判据（match 0/1）：
 1. 解说描述的事件/对象/情绪与画面相同或直接相关 → 1
@@ -38,10 +44,8 @@ why 只在 match=0 时写一句话理由，其余留空字符串。
 """
 
 
-def ffmpeg_bin() -> str:
-    return (os.environ.get("NARR_FFMPEG")
-            or shutil.which("ffmpeg")
-            or r"C:\Users\10451\.workbuddy\binaries\ffmpeg\bin\ffmpeg.exe")
+# ffmpeg_bin 由 aicutplan.media 提供（查找优先级 NARR_FFMPEG → AICUTPLAN_FFMPEG
+# → PATH → 本机兜底），避免每个抽帧脚本各写一份、换机器时漏改。
 
 
 def sent_times(proj_dir: Path, narr: list[dict]) -> list[dict]:

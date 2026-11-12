@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：内嵌字幕优先台词源（跳过 ASR） ｜ 调用者：asr_local; cf_pipeline --subs ｜ 产物：ja-segments/asr_ja/asr_zh
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """内嵌字幕优先的台词源：MKV/MP4 自带字幕轨时直接提取，跳过 ASR 音转字。
 
 为什么：ASR 是「猜」出来的（本项目 small 模型出现「ついほ?」「エンバーターチュー」
@@ -24,126 +26,44 @@ from __future__ import annotations
 
 import argparse
 import difflib
-import hashlib
 import json
-import re
-import shutil
 import subprocess
 import sys
 from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))   # 直接运行本脚本时也要能 import aicutplan
 
-TEXT_CODECS = {"subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text", "subviewer"}
-IMAGE_CODECS = {"hdmv_pgs_subtitle", "dvb_subtitle", "dvd_subtitle", "xsub", "dvb_teletext"}
-LANG_TAG = {"jpn": "ja", "jp": "ja", "ja": "ja", "eng": "en", "en": "en",
-            "zho": "zh", "chi": "zh", "zh": "zh", "zh-hans": "zh", "zh-hant": "zh",
-            "chs": "zh", "cht": "zh", "kor": "ko", "ko": "ko"}
-KANA = re.compile(r"[\u3040-\u30ff]")
-HAN = re.compile(r"[\u4e00-\u9fff]")
-LATIN = re.compile(r"[A-Za-z]")
-TAG = re.compile(r"\{[^}]*\}|<[^>]+>|&\w+;")
-SPEAKER = re.compile(r"^[（(]([^）)]{1,12})[）)]\s*")
-SRT_TIME = re.compile(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)")
+# ---- L0 基础层复用：字幕纯函数 / 内容指纹 / 备份 / ffprobe 只有一份实现 ----
+from aicutplan import subtitles as SUB                              # noqa: E402
+from aicutplan.cache import project_key as pkey                   # noqa: E402
+from aicutplan.cache import source_sig as content_sig, sig_valid  # noqa: E402
+from aicutplan.io import backup_copy as backup                    # noqa: E402
+from aicutplan.media import ffmpeg_bin                            # noqa: E402
+from aicutplan.media import probe_json as ffprobe_json            # noqa: E402
 
-
-def ffprobe_json(video: Path) -> dict:
-    r = subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-show_format",
-                        "-of", "json", str(video)], capture_output=True, text=True)
-    if r.returncode != 0:
-        raise RuntimeError(f"ffprobe 失败: {r.stderr[:200]}")
-    return json.loads(r.stdout or "{}")
-
-
-def probe_subs(video: Path) -> list[dict]:
-    d = ffprobe_json(video)
-    out = []
-    for s in d.get("streams", []):
-        if s.get("codec_type") != "subtitle":
-            continue
-        tags = s.get("tags") or {}
-        disp = s.get("disposition") or {}
-        out.append({"index": int(s["index"]), "codec": s.get("codec_name", ""),
-                    "language": str(LANG_TAG.get(str(tags.get("language", "")).lower(),
-                                                 str(tags.get("language", "")).lower())),
-                    "title": str(tags.get("title", "")),
-                    "forced": bool(disp.get("forced")),
-                    "default": bool(disp.get("default"))})
-    return out
-
-
-def clean_text(raw: str) -> tuple[str, str]:
-    """去样式标签、合并换行；把「（角色名）」拆成 speaker 字段。"""
-    t = TAG.sub("", raw).replace("\\N", " ").replace("\\n", " ")
-    t = re.sub(r"\s+", " ", t).strip()
-    speaker = ""
-    m = SPEAKER.match(t)
-    if m:
-        speaker = m.group(1).strip()
-    return t, speaker
-
-
-def parse_srt(path: Path) -> list[dict]:
-    txt = path.read_text(encoding="utf-8-sig", errors="replace").strip()
-    rows = []
-    for block in re.split(r"\n\s*\n", txt):
-        ls = [x for x in block.splitlines() if x.strip()]
-        if len(ls) < 2:
-            continue
-        ti = next((i for i, x in enumerate(ls) if SRT_TIME.search(x)), None)
-        if ti is None:
-            continue
-        m = SRT_TIME.search(ls[ti])
-        g = list(map(int, m.groups()))
-        a = g[0] * 3600 + g[1] * 60 + g[2] + g[3] / 1000
-        z = g[4] * 3600 + g[5] * 60 + g[6] + g[7] / 1000
-        body = " ".join(ls[ti + 1:])
-        text, speaker = clean_text(body)
-        if not text or z <= a:
-            continue
-        rows.append({"start": round(a, 3), "end": round(z, 3),
-                     "text": text, "speaker": speaker})
-    rows.sort(key=lambda x: x["start"])
-    return rows
-
-
-def merge_same_time(rows: list[dict]) -> list[dict]:
-    """ASS 常把一句台词按屏幕位置拆成多行（同一 start/end），需合并成一条，
-    否则 dlg 会出现「ああ うちのギルドで」「いらねえやつをな。」两条半句。"""
-    out: list[dict] = []
-    for r in rows:
-        if out and abs(out[-1]["start"] - r["start"]) < 0.06 \
-                and abs(out[-1]["end"] - r["end"]) < 0.06:
-            out[-1]["text"] = (out[-1]["text"] + " " + r["text"]).strip()
-            out[-1]["end"] = max(out[-1]["end"], r["end"])
-            if r["speaker"] and not out[-1]["speaker"]:
-                out[-1]["speaker"] = r["speaker"]
-        else:
-            out.append(dict(r))
-    return out
+# 兼容别名：历史模块级名字保留，外部脚本仍可 from subs_extract import ...
+TEXT_CODECS, IMAGE_CODECS, LANG_TAG = SUB.TEXT_CODECS, SUB.IMAGE_CODECS, SUB.LANG_TAG
+clean_text = SUB.clean_text
+parse_srt = SUB.parse_srt
+merge_same_time = SUB.merge_same_time
+sniff_lang = SUB.sniff_lang
+norm = SUB.norm
+probe_subs = SUB.probe_subs
 
 
 def extract(video: Path, stream: dict, tmp: Path) -> list[dict]:
+    """抽一条字幕轨为 SRT 并解析（有副作用：调 ffmpeg），纯解析部分走 L0。"""
     tmp.mkdir(parents=True, exist_ok=True)
     dst = tmp / f"stream{stream['index']}.srt"
     if not dst.exists() or dst.stat().st_size < 100:
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", str(video),
+        subprocess.run([ffmpeg_bin(), "-y", "-v", "error", "-i", str(video),
                         "-map", f"0:{stream['index']}", "-c:s", "srt", str(dst)],
                        check=False)
     rows = parse_srt(dst)
     return merge_same_time(rows) if stream["codec"] in ("ass", "ssa") else rows
-
-
-def sniff_lang(rows: list[dict]) -> str:
-    s = "".join(r["text"] for r in rows[:80])
-    if KANA.search(s):
-        return "ja"
-    if LATIN.search(s) and not HAN.search(s):
-        return "en"
-    if HAN.search(s):
-        return "zh"
-    return "unknown"
 
 
 def pick_stream(video: Path, streams: list[dict], tmp: Path,
@@ -186,35 +106,10 @@ def pick_stream(video: Path, streams: list[dict], tmp: Path,
     return cands[0], cands
 
 
-def content_sig(video: Path, stream: dict) -> str:
-    st = video.stat()
-    raw = f"{video.resolve()}|{st.st_size}|{int(st.st_mtime)}|{stream['index']}|{stream['codec']}"
-    return hashlib.md5(raw.encode()).hexdigest()[:12]
-
-
-def pkey(proj_dir: Path) -> str:
-    return hashlib.md5(str(proj_dir.resolve()).encode()).hexdigest()[:12]
-
-
-def backup(p: Path, tag: str) -> None:
-    """复制备份并保留原文件。
-
-    这里所有写回都是 write_text 强制覆盖，不存在「文件存在就跳过」的问题；
-    而 shots_desc.json 是 refresh_derived 要**原地修改**的输入，若用改名把它
-    移走，下游 scene_from_shots.py 就会读不到（曾实际踩到）。
-    r5_tts 那类靠「文件不存在」触发重合成的环节才该用改名。
-    """
-    if not p.exists():
-        return
-    dst = p.with_name(p.name + tag)
-    if dst.exists():
-        dst = p.with_name(p.name + tag + "_" + datetime.now().strftime("%H%M%S"))
-    shutil.copy2(p, dst)
-    print(f"  备份 {p.name} → {dst.name}")
-
-
-def norm(s: str) -> str:
-    return re.sub(r"[^\w\u3040-\u30ff\u4e00-\u9fff]", "", str(s)).lower()
+# content_sig / pkey / backup / norm 已复用 aicutplan.cache / io / subtitles
+# （别名见文件头）。备份语义说明：这里写回是 write_text 强制覆盖，必须用
+# backup_copy「复制并保留原文件」——shots_desc.json 是 refresh_derived 要
+# 原地修改的输入，改名移走会让下游 scene_from_shots.py 读不到（实际踩过）。
 
 
 def migrate_zh(proj_dir: Path, rows: list[dict], lang: str) -> None:
@@ -324,9 +219,21 @@ def main() -> int:
             cur = []
 
     if a.check:
+        # 真正校验内容指纹（L0 aicutplan.cache）：源片/字幕轨换了却没重新提取
+        # 会让下游一直用旧台词，这里直接报「过期」并返回非 0，便于 CI 拦截。
         old = json.loads(seg_f.read_text(encoding="utf-8")) if seg_f.exists() else {}
         print("台词源:", old.get("source", "asr/未知"), "| sig:", old.get("sig", "无"))
         print("源片:", video, "| 存在:", video.exists())
+        if video.exists() and old.get("sig"):
+            streams = probe_subs(video)
+            best = next((s for s in streams
+                         if s["index"] == old.get("stream")
+                         and s["codec"] == old.get("codec")), None)
+            if best:
+                ok, why = sig_valid(seg_f, content_sig(video, best))
+                print("指纹校验:", "新鲜 ✓" if ok else f"过期 ✗（{why}）")
+                return 0 if ok else 1
+            print("指纹校验: 源片里找不到产物记录的那条字幕轨，无法比对")
         return 0
 
     if not video.exists():

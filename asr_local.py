@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 台词源] 职责：本地 faster-whisper（有字幕自动跳过） ｜ 调用者：pipeline:3 ｜ 产物：asr_ja.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """本地 ASR：faster-whisper 转写人物台词 → asr_<lang>.json
 
 产物格式与历史工程一致：{"model","lang","paras":[{"t0","t1","text"}]}，t0/t1 是源片秒。

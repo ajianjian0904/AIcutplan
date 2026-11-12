@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：TTS 音频弹性适配已定槽位 ｜ 调用者：cf_pipeline:6; qc_loop ｜ 产物：qc_report.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """Cut-first 阶段三：弹性对齐 + 质检报告（elastic alignment）。
 
 画面槽位已定型，TTS 之后做的是"音频适配槽位"而非"裁画面适配音频"：

@@ -1,3 +1,5 @@
+# [L1 会话工具] 职责：镜头描述推导 2s 窗（零读图） ｜ 调用者：subs_extract --refresh-derived ｜ 产物：json/scene_desc.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """从镜头描述（会话内视觉产出）推导每 2s 场景描述：窗口继承所在镜头的 desc/depth + 该窗台词。
 
 用法：python scene_from_shots.py --project P [--win 2.0]

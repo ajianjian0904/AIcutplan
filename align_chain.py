@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 旧链] 职责：旧对齐前置（cut-first 已停用） ｜ 调用者：pipeline ｜ 产物：cutplan.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """对齐前置：先重建初版 cutplan（回到与 script.anchor_new 一致的轴），再跑 n3 对齐。
 
 为什么必须重建：

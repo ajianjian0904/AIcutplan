@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：剧情因果图谱 func/cause/result ｜ 调用者：cf_pipeline:1 ｜ 产物：story_plan.causal
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """因果图谱层：给事件表补上「起因 / 结果 / 叙事功能」，替代扁平事件列表。
 
 输入 story_plan.events + 会话内读图产出的镜头证据（P0-2 回喂），输出：

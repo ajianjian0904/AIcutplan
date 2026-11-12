@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# [L1 共享库] 职责：旁白数据层/预算门禁/LLM 客户端 ｜ 调用者：server; smart_align; narrate_cut ｜ 产物：库（无独立产物）
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """旁白工作台 · 数据层、提示词模板、DeepSeek 客户端、只读校验、阶段门禁
 
 设计约束：

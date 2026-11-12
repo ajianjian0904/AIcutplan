@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：剪映草稿子进程 ｜ 调用者：jianying_export ｜ 产物：剪映草稿
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """剪映草稿生成器（在 WorkBuddy 托管 venv 中运行，那里才有 pyJianYingDraft）。
 
 输入：一个 JSON 计划文件；输出：一份剪映可读的明文草稿目录。

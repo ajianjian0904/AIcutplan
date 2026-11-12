@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L2 编排层] 职责：Cut-first 一键主链 ｜ 调用者：用户 / python -m aicutplan run ｜ 产物：out/03-rapid-narration.mp4
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """Cut-first 一键编排：剧情→画面先定→粗剪→旁白→TTS→弹性→混音→合流。
 
 把 cut-first 全链固化成一条命令。LLM 决策环节三种模式：
@@ -32,53 +34,14 @@ def run(cmd: list[str], cwd: Path | None = None) -> bool:
 
 
 def lint_narration(proj_dir: Path) -> list[str]:
-    """TTS 前规则 lint：窗口全覆盖、槽位字数预算、顺序单调。返回违规清单。"""
-    d = proj_dir / "json"
-    plan = json.loads((d / "cutplan.json").read_text(encoding="utf-8"))
-    narr = json.loads((d / "narration.json").read_text(encoding="utf-8"))
-    wins = plan["windows"]
-    n_w = len(wins)
-    covered: set[int] = set()
-    bad: list[str] = []
-    prev_end = -1.0
-    al = json.loads((d / "align.json").read_text(encoding="utf-8"))
-    # 用 TTS 实测时长而不是「字数/4.95」粗估：+35% 语速下粗估会明显高估，
-    # 把本来贴合的句子误判成超槽（句34 实测 5.78s / 粗估 7.88s / 槽位 7.42s）。
-    tts_f = d / "tts-result.json"
-    narr_f = d / "narration.json"
-    # lint 跑在 r5_tts / elastic_fit 之前：tts-result 常是上一稿的旧数据，
-    # 拿旧稿时长判新稿会误报。只有 tts-result 不早于 narration 时才算「同稿」。
-    fresh = (tts_f.exists() and narr_f.exists()
-             and tts_f.stat().st_mtime >= narr_f.stat().st_mtime)
-    tts_dur = ({int(x["i"]): float(x.get("tts_dur") or 0)
-                for x in json.loads(tts_f.read_text(encoding="utf-8"))["items"]}
-               if fresh else {})
-    # 粗估「字数/4.95」在 +35% 语速下系统性高估，容差放宽；真实超槽由 elastic_fit 兜底
-    tol = 0.35 if fresh else 0.8
-    # 原声留白窗（hold_hl）本来就不写旁白，不能算「未覆盖」
-    raw_wins = {i for i, w in enumerate(wins)
-                if w.get("tier") == "hold_hl" or w.get("ost_mode") == "original"}
-    for it in narr["items"]:
-        swi = al["sent_win_idx"].get(str(it["i"]))
-        if not swi:
-            bad.append(f"句{it['i']} 无窗口绑定")
-            continue
-        lo, hi = swi
-        if lo < prev_end:  # 顺序回跳
-            bad.append(f"句{it['i']} 窗口顺序回跳 ({lo} < {prev_end})")
-        prev_end = hi
-        slot = wins[hi]["new_end"] - wins[lo]["new_start"]
-        est = tts_dur.get(int(it["i"])) or len(it["text"]) / 4.95
-        if est > slot + tol:
-            bad.append(f"句{it['i']} 语音 {est:.2f}s > 槽位 {slot:.2f}s（{it['text'][:14]}）")
-        for x in range(lo, hi + 1):
-            if x in covered:
-                bad.append(f"窗口{x} 被重复覆盖")
-            covered.add(x)
-    unc = [x for x in range(n_w) if x not in covered and x not in raw_wins]
-    if unc:
-        bad.append(f"未覆盖窗口 {unc[:10]}{'...' if len(unc) > 10 else ''}")
-    return bad
+    """TTS 前规则 lint —— 薄委托到 L0 数据契约层。
+
+    实现在 :func:`aicutplan.contracts.lint_narration`，与 ``python -m
+    aicutplan check`` 共用同一份规则，避免「编排器一套、体检一套」。
+    历史修正（留白窗不算未覆盖、同稿才用实测时长）已固化在契约层。
+    """
+    from aicutplan.contracts import lint_narration as _lint
+    return _lint(proj_dir)
 
 
 def report(proj_dir: Path) -> None:

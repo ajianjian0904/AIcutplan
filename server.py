@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：本地 HTTP 校对台（标准库零依赖） ｜ 调用者：start.bat ｜ 产物：8 个页面 + /api/*
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """锚点校对台 · 本地服务（Python 标准库，零依赖）
 
 只做一件事：让人按「剧情块」整体平移源片取段，然后写回 cutplan.json。

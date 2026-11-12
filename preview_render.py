@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：会话块级 Δ 预览渲染 ｜ 调用者：server ｜ 产物：cache/preview_clips
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """临时渲染预览：按当前会话状态（块级 Δ + 句级锚点，无需写回）拼出片段。
 
 只读工程素材，产物只写工作区 cache/preview_clips/。

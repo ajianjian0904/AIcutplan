@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 旧链] 职责：镜头切分 ｜ 调用者：pipeline:2 ｜ 产物：shotlist.csv
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """镜头切分：场景变化检测 → shotlist.csv（idx,start,end,dur,motion,bright,ost）
 
 做法：

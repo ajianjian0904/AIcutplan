@@ -1,243 +1,291 @@
-# AIcutplan · 漫剪校对台
+# AIcutplan · 漫剪解说流水线
 
-> 动漫剪辑，目前针对 AI 自动剪辑无法达到人为要求的情况，加入人机结合的剪辑方法。
+> 动漫速讲的一集从片源到成片：**画面先定 → 旁白后写 → 生成后质检闭环**。
+> 另带一个本地 web 校对台，用于逐句审稿、挑画面、导出剪映草稿。
 
-本地运行的动漫速讲（漫剪）校对工作台：把「旁白 / 画面 / 人物台词」统一到同一条时间轴上逐句确认，最后写回 `cutplan.json`，可选导出为剪映草稿继续精修。
+项目里存在**两条链路**，先选对入口：
 
-服务端只用 Python 标准库 `http.server`，前端无构建，三页共用一套静态文件；除 ffmpeg 外没有硬依赖。
-
-## 八个页面
-
-| 页面 | 路径 | 做什么 |
+| 你要做什么 | 用哪条 | 入口 |
 |---|---|---|
-| 制作流水线 | `/flow` | **一集从 0 到成片的总控**：17 步按产物自动判定状态，可直接运行洗片 / 切分 / ASR / 译中 / 剧情解析 / 落稿 / TTS / 对齐 / 切片 / 重排 / 混音 / 合流 / 字幕烧入，日志实时回传；也是新建工程的入口 |
-| 镜头台 | `/shots` | **镜头表审阅**：逐镜缩略图、时长分布；合并 / 删除 / 切分 / 挪边界 / 标原声；有效段写回 `project.json` |
-| 台词台 | `/asr` | **原文与中文译文对照**：逐段可改，只改文本不动时间戳；就地触发分批译中 |
-| 剧情台 | `/story` | **AI 解析剧情 + 人工审核**：模型读「字幕 + 抽帧」出事件表，再合成 12–15 个剧情块；可改块名 / 性质 / 边界 / 成片秒数，实时算字数预算；一键落 `script` 骨架与 `cutplan` 初版 |
-| 逐句校对台 | `/review` | **逐句三轨对齐**：旁白（成片秒）、画面（每刀缩略图）、人物台词（源片秒投影到成片轴）。播放时三者同步高亮，可给每句定【首镜, 尾镜】、逐句确认 |
-| 锚点校对台 | `/` | **按剧情块整块平移**源片取段，A/B 抽帧判有没有跳场，确认后写回 |
-| 旁白工作台 | `/narration` | 与 DeepSeek 协作改稿：模板 / 变量注入 / 草稿快照 / 定稿 / 写回 `script.json` / 生成 7 步重跑脚本 |
-| 交付台 | `/deliver` | **成片播放与验收**（Range 拖动）、临时预览渲染、导出剪映草稿（整片 / 逐刀） |
+| 出一集成片（当前主线） | **cut-first 新主链** | `python -m aicutplan run` 或 `cf_pipeline.py` |
+| 逐句审稿 / 挑首镜尾镜 / 看三轨 / 导出草稿 | **web 校对台（旧链）** | `python server.py` → `http://127.0.0.1:8765` |
 
-## 制作流程（流水线 17 步）
+完整分层、依赖全表与设计约束见 **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)**；
+变更历史见 [CHANGELOG.md](CHANGELOG.md)。
 
-```
-素材  洗片 → 镜头切分
-台词  语音识别 → 台词译中
-文案  剧情解析（AI，机器出骨架 + 人审核）→ 剧情文案（人工，旁白工作台）→ 旁白落稿
-旁白  配音 TTS
-画面  旁白对齐 → 按刀切片 → 时间线重排
-合成  混音 → 合流成片 → 字幕（烧入）
-校对  三轨校对（人工，逐句台）→ 写回 cutplan（人工，锚点台）
-交付  预览 / 导出剪映
-```
-
-每一步只声明三件事：**产物**（决定状态灯）、**依赖**（前置未完成会提示）、**命令**（用当前解释器调工程或 skill 里的脚本）。产物存在即亮绿，`relayout` 这类步骤还会比较产物与上游的 mtime，比上游旧就标「需重排」。
-
-同一时刻只允许跑一个后台任务（ffmpeg 与 TTS 抢磁盘，并发只会更慢）；日志落 `cache/jobs/*.log`，界面按行增量拉取。
-
-## 剧情解析怎么工作（`/story`）
-
-这是「机器出骨架、人只审核」的那一环，三步：
-
-1. **分段**：按 `recap.valid` 把整集切成 200s 的窗口（8 段/集），每段带该段中文字幕（源片秒）与 12 张均匀抽帧。
-2. **逐段解析**：一次请求同时给「带时间戳的字幕」+「每张图标注源片秒」，要求输出 8–14 个连续事件：谁、做了什么、性质（钩子/铺垫/冲突/反转/爽点/收尾）、建议保留几秒。段结果落 `cache/story/<hash>/seg_XX.json`，断点续传。
-3. **合成块表**：全部事件 + 目标成片时长 + 六段式模板再调一次，输出 12–15 块（源区间 + 成片秒数 + 一句话概要），OP/标题卡/预告标 `收录`、`target=0`，不进块表。
-
-产物：`json/story_plan.json`（分段 / 事件 / 块表 / 预算）。审核在页面上改，可改块名、性质、源区间、成片秒数，底部实时算「Σ成片秒 vs 目标」与字数预算。确认后：
-
-- **写 script 骨架** → `json/script.json`（块名 + 时间锚点 + 空文案），旁白台按块生成文案
-- **生成 cutplan 初版** → `json/cutplan.json`（每块按 `target/1.32` 铺刀，块内均匀取镜，`new_start` 累计） + `json/shots-cache.json`
-
-实测（EP05，1420s / 8 段）：每段 10–35s、8–10k tokens，全片约 4 分钟、约 60k tokens。模型会把 OP/标题卡当剧情，所以这一步**必须人审**——这正是它留在页面上的原因。
-
-## 全自动跑通（跳过人工审核）
-
-```bash
-# 一次跑完：洗片 → 切分 → ASR → 译中 → 剧情解析 → 自动写稿 → TTS → 对齐 → 切片 → 重排 → 混音 → 合流 → 字幕
-python prepare_media.py  --project <pj>                      # 10bit/HEVC/带 ASS 自动转 H.264 8bit
-python shots_scan.py     --project <pj> --scene 0.30
-python asr_local.py      --project <pj> --lang ja --size small
-python asr_pipeline.py   --project <pj> --batch 24           # 台词译中
-python story_parse.py    --project <pj> --segment 200 --frames 12
-python story_parse.py    --project <pj> --write-script --write-cutplan
-python auto_script.py    --project <pj>                      # AI 整稿 → 补缺块 → 定稿 → 写回
-python auto_script.py    --project <pj> --fit                # 超预算的块压缩
-python auto_script.py    --project <pj> --expand             # 偏短的块扩写
-python shot_desc.py      --project <pj>                      # 全片镜头描述（可选，启用后句镜按内容匹配）
-python align_chain.py    --project <pj>                      # 整镜头对齐（句→事件→镜头，语音时长驱动）
-python cut.py            --project <pj> --force
-python relayout_narr.py  (cwd=工程目录)
-python r6_mix.py         --project <pj>
-python r7_mux.py         --project <pj>
-python make_srt.py       --project <pj> --burn               # 出 srt 并烧进成片
-```
-
-实测一集（`[NanakoRaws] Tsuihou ... - 01`，23.8 分钟 1080p HEVC 10bit，1429.9s）：
-
-| 阶段 | 耗时 | 产物 |
-|---|---|---|
-| 洗片（10bit → H.264 8bit 1080p） | 8 分 | 391MB mp4 + 260MB wav |
-| 镜头切分（scene 0.30） | 58s | 290 镜，中位 3.25s |
-| ASR（faster-whisper small / CUDA float32） | 151s | 404 段 |
-| 台词译中（17 批） | 147s | 404/404，35k tokens |
-| 剧情解析（8 段 × 12 帧） | 188s | 100 事件 → 14 正片块 + 1 收录，48k tokens |
-| 自动写稿 + 压缩 + 补足 | 6 分 | 1325 字 / 127 句 |
-| TTS（edge-tts） | 13–161s | 127 句 / 253.9s |
-| 对齐 + 切片 + 重排 + 混音 + 合流 | 3 分 | 193 刀 / 254.5s |
-| 字幕烧入 | 79s | 127 条，92MB |
-
-成片验收（`r7_mux` 自检）：时长 254.5s ✓、切点密度 45.5/分 ✓、段数 193 ✓、字/刀 6.21 ✓、
-旁白覆盖 93.8% ✓、响度 −13.4 LUFS ✓、LRA 2.7 ✓；旁白字数 1198（目标 1350+）、句数 127（目标 130+）双双略低。
-
-## 核心编辑模型
-
-这套工具刻意只做一件事，并且把边界写死：
-
-- **成片时长由旁白 TTS 实测时长决定**，锁死。画面只允许改「从源片哪个时刻开始取」。
-- 所有写回**只改 `cutplan.json` 的 `src_start / src_end`**，`dur / new_start / new_end / sent_ids` 一个都不碰，写前自动备份。
-- 两级编辑，写回时**句级优先于块级**：
-  - 块级：整块平移 Δ，块内所有刀一起移动，长度不变
-  - 句级：给一句定【首镜, 尾镜】，句内 2–3 刀按顺序铺满，只改这几刀，**不挪任何其他刀位**（因此天然避开级联漂移）
-- 不开放：逐刀拖拽、改刀数/刀长、改块长度、AI 自动重排、匹配度打分。理由是四集实测结论——一句旁白平均跨 1.73 刀、每刀固定 1.32s，逐句一镜会让单镜变 1.96s（比对标慢 48%）；且 48% 是演绎刀、52% 是情境刀，后者本就不该跟旁白语义匹配，机器换图的实测结果是「换对 18%、改坏 64%」。
-
-## 工程目录约定
-
-```
-<工程目录>/
-  project.json               # 名称、fps、语速等
-  shotlist.csv               # 镜头表：idx,start,end,dur,motion,bright,ost
-  asr_ja.json                # 语音识别结果（paras: t0/t1/text），语言后缀可为 en/ko/zh
-  json/cutplan.json          # 245 个窗口：src_start/src_end/dur/new_start/new_end/sent_ids
-  json/align.json            # beat_win（刀→块分组）、sent_span、sent_beat
-  json/narration.json        # items：i/text/beat/t0/dur/chars
-  json/script.json           # beats[]：剧情块文案
-  out/01-video-no-ad.mp4     # cut.py 的真实输入，抽帧与切段的时间基准
-  out/mix-rapid.wav          # 最终混音（预览用）
-  out/中文旁白-recap.srt      # 成片字幕（预览烧录用）
-```
+---
 
 ## 快速开始
 
 ```bash
-# 1) 依赖
-python 3.12
-ffmpeg / ffprobe 在 PATH 上
+# 核心（L0 基础层 / CLI / 单元测试 / web 台）零第三方依赖，Python >= 3.10 + ffmpeg 即可
+python -m aicutplan version
+python -m aicutplan check --project <工程目录>/project.json
 
-# 2) 指定工程（二选一）
-set RECAP_PROJECT=<你的工程目录>      # Windows
-export RECAP_PROJECT=<你的工程目录>   # bash
+# 出成片需要 TTS 与（质检用的）Pillow
+pip install -e ".[tts,vision]"
+# 或按需安装：pip install -r requirements.txt（文件内按用途分组，默认全注释）
 
-# 3) 启动
-python server.py        # 或双击 start.bat
-# → http://127.0.0.1:8765
+# web 校对台
+python server.py            # 或双击 start.bat → http://127.0.0.1:8765
 ```
 
-界面右上角也可以直接填工程目录点「载入工程」，选择会记进 `studio_state.json`，下次启动自动载入。
+统一 CLI 门面（参数原样透传给对应阶段脚本）：
 
-### 可选依赖
+```bash
+python -m aicutplan subs --project <pj> --apply --refresh-derived   # 内嵌字幕优先
+python -m aicutplan run  --project <pj> --sentences sents.json      # 一键主链
+python -m aicutplan qc   --project <pj> --plan 6                    # 会话内质检批次
+python -m aicutplan check --project <pj>                            # 工程体检
+python -m aicutplan serve                                           # web 台
+```
 
-| 能力 | 需要 | 说明 |
-|---|---|---|
-| 旁白 AI 协作、台词译中 | 环境变量 `DEEPSEEK_API_KEY` | Key 只在内存读取，不写文件、不进日志；缺失时可用「手工粘贴」模式 |
-| 导出剪映草稿 | `pip install pyJianYingDraft==0.3.1` | 需装在某个解释器里，用 `JY_PYTHON` 指定；未指定时自动探测当前解释器与托管 venv |
+`run / plan / subs / qc / qc-apply / narrate / parse / serve` 都是薄门面，
+业务逻辑仍在根目录脚本里，不存在两份实现。
 
-## 目录结构
+---
+
+## 项目结构
 
 ```
-server.py            HTTP 服务：工程载入、会话状态、写回、抽帧、预览、路由
-pipeline.py          流水线：15 步定义、产物扫描、后台任务执行器、新建工程、镜头表/台词表读写
-prepare_media.py     洗片：流复制 + 抽音 + ffprobe（流水线第 1 步）
-shots_scan.py        镜头切分：场景检测 + 按镜音频能量（第 2 步）
-asr_local.py         本地 faster-whisper 转写（第 3 步）
-review.py            逐句三轨数据（台词投影到成片轴）、候选首镜、确认进度
-sentence_studio.py   句↔刀映射、句级锚点计算、两层合并、台词查询
-preview_render.py    临时渲染：按刀切源片 + 拼接 + 混音 + 烧字幕 + 首帧海报
-narration.py         旁白模板/草稿/快照/定稿、DeepSeek 客户端、字数预算与只读校验
-asr_pipeline.py      多语 ASR 检测、按批翻译为中文、断点续传（含 CLI，供流水线调用）
-auto_script.py       自动写稿：整稿生成 → 补缺块 → 按预算压缩/扩写 → 定稿写回
-smart_align.py       整镜头剪辑引擎：语音时长驱动选镜（博主节奏），句→事件→镜头三层语义匹配
-shot_desc.py         镜头描述层：全片逐镜 VLM 一句话描述（json/shots_desc.json）
-audit_frames.py      成片质检：逐句抽帧让视觉模型判「画面是否在演这句话」
-relayout_smart.py    句级重排：音频 t0 精确压在该句第一刀的成片起点
-verify_sync.py       校验：刀-事件命中率、音频是否在句自己的刀内
-align_chain.py       对齐入口（默认 smart_align，--classic 退回 n3）
-make_srt.py          narration.json → srt，可选烧进成片
-jianying_export.py   剪映草稿计划/自检/安装
-jianying_worker.py   在装了 pyJianYingDraft 的解释器里生成明文草稿
-web/                 七页前端 + 共用底座 base.css
-templates.json       旁白提示词模板
-tts_calibration.json 本机 TTS 实测标定（有效语速、固定静音）
+aicutplan/        L0 基础层（可打包、零依赖、单测主体）
+  paths io media cache contracts       工程路径 / 原子写 / ffmpeg / 内容指纹 / 数据契约
+  subtitles planning evidence cli     领域纯函数 + 统一 CLI
+docs/             架构说明
+tests/            标准库 unittest 测试（零 ffmpeg / 零网络 / 零模型）
+web/              8 个页面的静态文件（无构建）
+根目录 *.py       L1 阶段脚本 / L2 编排 / L3 web 台，每个文件顶部有 # [L...] 分层标识
+pyproject.toml requirements.txt .gitignore CHANGELOG.md
 ```
+
+**为什么阶段脚本不搬进包目录**：脚本靠 `ROOT = Path(__file__).parent` 互相定位、
+`cf_pipeline` 用相对 ROOT 起子进程、仓库外的 `cut.py/r5_tts/r6_mix/r7_mux` 按工程
+目录约定读写文件。彻底分包会打断这三条，所以只把无副作用、可单测的共享能力抽进包。
+详见 [架构说明 §3](docs/ARCHITECTURE.md)。
+
+---
+
+## cut-first 主链
+
+时序翻转是这套流水线的核心：旧做法是「旁白定稿 → TTS → 用语音时长裁画面」，
+语义匹配从起点就是被动妥协；现在**先依据剧情理解定输出时间轴**，旁白对着已定型的
+时间轴写，同步靠生成顺序保证。
+
+```bash
+PY=D:/Python312/python.exe
+PJ=<工程目录>/project.json
+
+$PY cf_pipeline.py --project $PJ --sentences sents.json --qc
+# 等价：python -m aicutplan run --project $PJ --sentences sents.json --qc
+```
+
+| # | 脚本 | 做什么 | 产物 |
+|---|---|---|---|
+| 0 | `subs_extract.py`（`--subs yes`） | 源片自带字幕时直接提取，跳过 ASR | `ja-segments.json` / `asr_ja.json` / 译中缓存 |
+| 1 | `causal_graph.py` | 事件补 `func/cause/result`，证据回喂 | `story_plan.causal` |
+| 2 | `cutfirst_plan.py` | 画面先定：连续爽点钩子 + 叙事权重选窗 | `json/cutplan.json` |
+| 3 | `cut.py`（工程目录） | 粗剪无声视频 + 原声轨 | `02-video-rapid-silent.mp4` |
+| 4 | `narrate_cut.py` | 旁白后写 / 导出写作输入表 | `narration.json` / `align.json` / `window_table.md` |
+| 5 | `lint_narration`（L0 contracts） | 窗口全覆盖 / 槽位预算 / 顺序单调 | 违规清单（默认阻断） |
+| 6 | `r5_tts.py` + `elastic_fit.py` | TTS + 音频弹性适配已定槽位 | `tts/NNN.mp3` / `qc_report.json` |
+| 7 | `r6_mix.py` + `r7_mux.py` | 混音 + 合片 + 12 项验收 | **`out/03-rapid-narration.mp4`** |
+| 8 | `qc_visual.py`（`--qc`） | 会话内逐句质检批次 | `.qcframes/session/grid_XX.jpg` |
+
+`--sentences <json>` = 会话内已写好的句子稿（WorkBuddy 导演模式，推荐，零 API）；
+不传则 `narrate_cut` 走 DeepSeek 自主写作。`--skip-plan / --skip-tts / --skip-render`
+用于只跑部分阶段，配合 `python -m aicutplan check` 做预检。
+
+### 关键数据契约
+
+- `narration.items[i].t0` **必须等于**该句 `ws` 窗口的 `new_start`。`cut.py` 会把帧网格
+  吸附后的精确时间回写进 `cutplan.json`（整体可能偏 ~0.04s），所以**重切之后必须重跑
+  `narrate_cut --sentences`**，否则全片音画错位。
+- `tier=hold_hl` / `ost_mode=original` 是原声留白窗，不写旁白、不算未覆盖；r6 按
+  「谁说话谁在场」做 0dB 原声门控，旁白不能塞进留白块。
+- 钩子 = **源片连续、未经裁切重排的一整段爽点**（不是全球检索的散装镜头），
+  由 `project.json` 的 `recap.hook_clip=[a,b]` 在规划阶段锁定；钩子镜头不进 `used`，
+  正片原样再演。`window_table.md` 的钩子块只列字数槽位 —— 这是剪辑规划决策，
+  **不属于旁白撰写素材**。
+- 全部字段与不变量见 [架构说明 §5](docs/ARCHITECTURE.md)，自动校验用
+  `python -m aicutplan check --project <pj>`。
+
+### 验收口径（cut-first 语义）
+
+`r7_mux.py` 的 12 项验收；指标不再是旧链的「字/刀」「旁白覆盖」，而是：
+
+- **句窗比** = 总字数 / 句数
+- **语音覆盖** = Σ实测净语音 / Σ槽位（不含静音）
+- **槽位贴合** = 超槽句数（`elastic_fit` 后应为 0）
+
+当前 v3.5 实测：338.1s / 1057 字 / 54 句 / 覆盖 69.0% / 原声留白 31.1% /
+−13.3 LUFS / LRA 5.2 / 会话内质检 54 句 0 失配。
+
+---
+
+## 会话内工作流（零 DeepSeek API）
+
+视觉描述、旁白写作、质检判定都可在 WorkBuddy 会话内完成：
+
+```bash
+# 1) 镜头证据包：分批读图（每轮 ≤8 帧）
+$PY session_desc.py --project $PJ --plan 8      # 生成批次清单
+#    会话内读图后： $PY session_desc.py --project $PJ --merge
+$PY scene_from_shots.py --project $PJ           # 推导 2s 窗场景描述（零读图）
+
+# 2) 导出写作输入表，会话内写句子稿 sents.json
+$PY narrate_cut.py --project $PJ --export       # → window_table.md
+$PY narrate_cut.py --project $PJ --sentences sents.json
+
+# 3) 生成后质检闭环
+$PY qc_visual.py --project $PJ --plan 6         # 2×3 宫格图 + plan_XX.json
+#    会话内逐格判定，写 .qcframes/session/verdict_XX.json：{"i":3,"match":0,"why":"..."}
+$PY qc_visual.py --project $PJ --merge          # → qc_visual.json + qc_rewrite.json
+$PY qc_visual.py --project $PJ --probe          # 失配句抽 3 帧复核，排除单帧假阳性
+$PY cf_pipeline.py --project $PJ --qc-apply <改好的句子稿>
+```
+
+- 抽帧取**句子首窗中点**（一句可跨 6 窗，整句中点会落到后半段画面）；`--plan`
+  强制重抽并按成片 mtime 失效缓存；全黑帧自动 +0.35s 重抽。
+- `qc_loop` 校验失配句确实改词，并在 r5 之后检查 mp3 是否真的被重写
+  （防「句子稿新词 / 成片旧音频」），不通过即中止后续混音。
+- `--dry-run` 只打印命令；`--qc-force` 在文本未变时也强制重合成。
+- **换窗口不走闭环**：改 `cutplan.json` 的 `src_start/src_end` 后需重跑
+  `cut.py → narrate_cut --sentences → r6_mix → r7_mux`（画面变了音频没变，无需 r5）。
+
+---
 
 ## 内嵌字幕优先（跳过音转字）
 
-MKV 常自带 ASS/SRT 字幕轨（有的同时有日文、英文）。**字幕是确定性文本**，比 ASR 转写准：本项目 small 模型出现过「ついほ?」「エンバーターチュー」这类幻听，且 faster-whisper 的段时间戳会漂移 3–16s；字幕还常带「（バリオス）」说话人标注。检测到文本字幕就直接提取，不再跑 ASR。
+MKV 常自带 ASS/SRT 字幕轨（有的同时有日文、英文）。**字幕是确定性文本**，比 ASR
+转写准：本项目 small 模型出现过「ついほ?」「エンバーターチュー」这类幻听，且
+faster-whisper 的段时间戳会漂移 3–16s；字幕还常带「（バリオス）」说话人标注。
+检测到文本字幕就直接提取，不再跑 ASR。
+
+```bash
+$PY subs_extract.py --project $PJ                          # 只探测对比，不写文件
+$PY subs_extract.py --project $PJ --apply --refresh-derived
+$PY subs_extract.py --project $PJ --prefer en             # 改成优先英文字幕
+$PY subs_extract.py --project $PJ --check                 # 校验内容指纹是否过期
+```
+
+- 探测**原始源片**（`project.json` 的 `source_video`），不能用 `out/01-video-no-ad.mp4`
+  —— 洗片转封装时字幕轨已被丢弃。
+- 排除图像字幕（PGS/DVB，需 OCR）→ 按 `--prefer` 语言优先级 → SRT/WEBVTT 优先于
+  ASS；ASS 会合并同 `start/end` 的多行（实测 516 行 → 352 条，与 SRT 一致）。
+- 产物与现有链路兼容：`json/ja-segments.json`、`asr_ja.json`、`asr/<pkey>/asr_zh.json`。
+  **译中缓存按「±20s 时间窗 + 原文相似度」迁移并补齐条数**，否则 `zh_subtitles`
+  按索引取译文会整体错行；匹配不上的保留原文标 `translated=false`。
+- 顶层写 `source: embedded-subtitle` 与 `sig`，`--check` 用 `aicutplan.cache.sig_valid`
+  比对，源片换了但台词源没更新时返回非 0。
+- `asr_local.py` 检测到文本字幕会自动跳过 faster-whisper（`--force-asr` 强制）；
+  `cf_pipeline.py --subs yes` 在链路开始前替换，默认 `auto` 只提示、不动已定型工程。
+- 时间轴前提：字幕时间是源片原始秒。若洗片裁过广告，需先给字幕加偏移，脚本不自动估计。
+
+实测当前工程：台词源 ASR 404 段 → 内嵌字幕 352 条，`shots_desc.dlg` 覆盖率
+78.6% → 88.6%（镜 1 从「ついほ?」变成「（バリオス）追放？」）。
+
+---
+
+## web 校对台（旧 17 步链）
+
+服务端只用 Python 标准库 `http.server`，前端无构建，除 ffmpeg 外没有硬依赖。
+**它仍可用于审稿与挑画面，但不要用它重跑生成步骤**（会覆盖 cut-first 数据，见下方风险）。
+
+| 页面 | 路径 | 做什么 |
+|---|---|---|
+| 制作流水线 | `/flow` | 17 步状态灯与后台任务（**只看看，别点运行**）；新建工程入口 |
+| 镜头台 | `/shots` | 逐镜缩略图、时长分布；合并 / 删除 / 切分 / 挪边界 / 标原声 |
+| 台词台 | `/asr` | 原文与中文译文对照，逐段可改；就地触发分批译中 |
+| 剧情台 | `/story` | 事件表 + 块表人工审核；写 `script.json` / 初版 `cutplan.json` |
+| 逐句校对台 | `/review` | **旁白 / 画面 / 人物台词三轨对齐**，逐句定【首镜, 尾镜】、确认 |
+| 锚点校对台 | `/` | 按剧情块整块平移源片取段（cut-first 工程**不适用**） |
+| 旁白工作台 | `/narration` | 模板 / 草稿快照 / 定稿 / 写回（旧 DeepSeek 写稿路径） |
+| 交付台 | `/deliver` | 成片播放（Range 拖动）、临时预览、导出剪映草稿 |
+
+⚠️ **两条链写同一个工程目录**：`/flow` 页第 3/4/6 步的「运行」会调旧 ASR /
+剧情解析 / 旁白台脚本，重建 `story_plan` / `cutplan` / `narration`，覆盖已定型的
+cut-first 数据。**审稿只用逐句台的句级锚点 + 确认（会话状态，不写盘）**；块级平移
+在钩子块（取自片尾）、原声留白块、手工换序段上会打乱画面。
+
+点「写回」时 `/api/save` 只改 `cutplan.json` 的 `src_start/src_end`
+（其余 `dur/new_start/new_end/tier/ost_mode/reason/sent_ids` 全保留），写前自动
+生成 `cutplan.json.bak.<时间戳>`。写回后需重跑 `cut → narrate_cut → r6 → r7`。
+
+流程页部分步骤显示「缺失」属正常：cut-first 换了产物名与工程目录，旧步骤按旧路径
+检查。详见 [架构说明 §2](docs/ARCHITECTURE.md)。
+
+---
+
+## 工程目录约定
+
+```
+<工程目录>/                       = project.json 所在目录（≠ 仓库根）
+├── project.json                   fps / recap.voice / recap.tts_rate / recap.hook_clip
+├── shotlist.csv                   镜头表
+├── asr_ja.json                    台词源（paras: t0/t1/text）
+├── json/                          story_plan / cutplan / align / narration /
+│                                  shots_desc / scene_desc / tts-result / qc_*.json
+├── tts/                           每句 000.mp3（按句号命名，注意缓存失效）
+├── out/                           01-video-no-ad.mp4 / 02-video-rapid-silent.mp4 /
+│                                  mix-rapid.wav / 03-rapid-narration.mp4
+├── verify/                        试听样本、ASR 校验 wav
+└── .qcframes/session/             质检宫格图与会话内判定
+```
+
+完整字段表见 [架构说明 §5](docs/ARCHITECTURE.md)，路径常量见 `aicutplan/paths.py`。
+
+---
+
+## 测试与开发
 
 ```bash
 PY=D:/Python312/python.exe
-PJ=<工程目录>/project.json
-
-$PY subs_extract.py --project $PJ                      # 只探测对比，不写文件
-$PY subs_extract.py --project $PJ --apply             # 写回台词源（自动改名备份）
-$PY subs_extract.py --project $PJ --apply --refresh-derived   # 顺带重算 dlg / scene_desc
-$PY subs_extract.py --project $PJ --prefer en         # 改成优先英文字幕
-$PY subs_extract.py --project $PJ --check             # 校验台词源指纹是否过期
+$PY -m unittest discover -s tests -v      # 标准库，零第三方依赖
+$PY -m pytest                            # 可选运行器
+$PY -m aicutplan check --project <pj>     # 真实工程体检
+$PY -m py_compile *.py aicutplan/*.py     # 全量语法
 ```
 
-- 探测**原始源片**（`project.json` 的 `source_video`），不能用 `out/01-video-no-ad.mp4`——洗片转封装时字幕轨已被丢弃。
-- 选择顺序：排除图像字幕（PGS/DVB，需 OCR）→ 按 `--prefer` 语言优先级 → SRT/WEBVTT 优先于 ASS；ASS 会合并同 `start/end` 的多行（否则一句台词被拆成两条半句）。
-- 产物与现有链路完全兼容：`json/ja-segments.json`（cut 对白映射 / shot_desc.dlg / scene_desc）、`asr_ja.json`（译中与写作表）、`asr/<pkey>/asr_zh.json`。**译中缓存按「±20s 时间窗 + 原文相似度」迁移并补齐条数**，否则 `zh_subtitles` 按索引取译文会整体错行；匹配不上的保留原文标 `translated=false`。
-- 顶层写 `source: embedded-subtitle` 与 `sig`（源片路径+大小+mtime+字幕流序号），`--check` 可发现源片换了但台词源没更新。
-- 集成：`asr_local.py` 检测到文本字幕会自动调用提取器并跳过 faster-whisper（`--force-asr` 可强制走 ASR）；`cf_pipeline.py --subs yes` 在链路开始前替换台词源，默认 `auto` 只提示不改动已定型工程。
-- 时间轴前提：字幕时间是源片原始秒。若 `out/01-video-no-ad.mp4` 与源片**等长**（没裁剪广告）可直接用；若洗片裁过，需要先给字幕加偏移，目前脚本不做自动估计。
+测试全部用 `tempfile` 造数据，**不碰真实工程、不调 ffmpeg / 网络 / 模型**。
+覆盖：字幕解析与 ASS 合并、钩子连续段选择与权重、证据打分压缩、窗口/对齐/TTS
+一致性契约、内容指纹失效、原子写与两类备份、工程路径、CLI 门面。
 
-## cut-first：会话内质检闭环（P0-1）
+新增脚本请遵守：
 
-渲染后把「人工看片发现音画错位」变成可重复流程，全程零 DeepSeek API：
+1. 无副作用、可复用的纯逻辑先进 `aicutplan/`，根目录脚本只留 CLI 编排；
+2. 文件顶部补 `# [层] 职责 / 调用者 / 产物`，并更新 `docs/ARCHITECTURE.md`；
+3. **不要用「文件存在就跳过」当缓存**，走 `aicutplan.cache` 的内容指纹
+   （历史事故清单见 [架构说明 §6](docs/ARCHITECTURE.md)）；
+4. 落盘用 `aicutplan.io.dump_json`（同目录原子写），备份区分 `backup_copy` /
+   `backup_rename`；
+5. 跑完自动校验产物与输入一致，别把发现问题的责任留给人看片。
 
-```bash
-PY=D:/Python312/python.exe
-PJ=<工程目录>/project.json
+---
 
-# 1) 逐句读图批次：每 6 句一张 2×3 宫格图 + plan_XX.json
-$PY qc_visual.py --project $PJ --plan 6
-#    会话内按 .qcframes/session/grid_XX.jpg 判定，写 verdict_XX.json（{i,match,why}）
-# 2) 合并 → json/qc_visual.json + json/qc_rewrite.json
-$PY qc_visual.py --project $PJ --merge
-# 3) 失配句每句抽 3 帧复核，排除「抽帧点落在黑帧/空镜」的假阳性
-$PY qc_visual.py --project $PJ --probe
-# 4) 改好句子稿后局部重跑：只重合成改过的句子，不整条重来
-$PY cf_pipeline.py --project $PJ --qc-apply <sentences.json>
-```
+## 解释器口径与安全边界
 
-- 抽帧取**句子首窗中点**（一句可跨 6 窗，整句中点会落到后半段画面）；`--plan` 强制重抽并按成片 mtime 失效缓存，避免旧版帧冒充当前成片；全黑帧自动往后挪 0.35s 重抽。
-- `qc_loop` 校验失配句确实改词，并在 r5 之后检查 mp3 是否真的被重写（防止「句子稿新词 / 成片旧音频」），不通过即中止后续混音。
-- 一键全链带质检：`cf_pipeline.py --project $PJ --sentences <稿> --qc`；`--dry-run` 只打印命令，`--qc-force` 在文本未变时也强制重合成。
-- **换窗口不走闭环**：改 `cutplan.json` 的 `src_start/src_end` 后需重跑 `cut.py → narrate_cut --sentences → r6_mix → r7_mux`（画面变了但音频不变，无需 r5）。
+| 解释器 | 有 | 用途 |
+|---|---|---|
+| `D:/Python312/python.exe` | torch / numpy / PIL | 规划、渲染、web 台、单元测试 |
+| `~/.workbuddy/binaries/python/envs/default/Scripts/python.exe` | edge_tts / faster_whisper | r5_tts、elastic_fit、asr_local |
 
-## 阶段门禁
+`cut.py / r5_tts.py / r6_mix.py / r7_mux.py` 是**工程目录脚本**（配方副本在
+`~/.workbuddy/skills/anime-recap/scripts/`），不在本仓库；关键修复（如 r6 采样率）
+需同步两处。ffmpeg 不在 PATH 时设 `AICUTPLAN_FFMPEG` 或 `NARR_FFMPEG`。
 
-- 旁白有**未定稿草稿**时，锚点台与逐句台的写回按钮被锁（后端 `/api/save` 直接返回 409），避免白做。
-- 定稿后继续改稿会自动撤销定稿并重新上锁。
-- 写回之后必须重跑 7 步链路（`build_narr → r5_tts → n3_align → cut → relayout_narr → r6_mix → r7_mux`），否则新的 `cutplan.json` 会覆盖刚做的平移。界面只展示/复制命令，不代为执行。
-
-## 安全边界
-
-- 除以下**显式动作**外，不修改工程目录任何文件：写回 `cutplan`、写回 `script.json`、镜头台改 `shotlist.csv`、台词台改 `asr_*.json`、新建工程写 `project.json`。草稿、快照、预览、翻译缓存、任务日志全部落在本仓库目录下。
-- 所有写回前自动备份（`*.bak.<时间戳>`），可回滚。
-- 流水线只**调用**工程与 skill 里的既有脚本，不改脚本行为；人工步骤（写文案、逐句校对、写回）不会被代跑。
-- `DEEPSEEK_API_KEY` 只从环境变量读，不落盘、不入日志、不进异常信息。
-- 剪映草稿默认只写到 `exports/jianying/`；写入剪映草稿目录需单独确认，且不覆盖同名、不改剪映索引。
+- 除显式动作外不修改工程目录：写回 `cutplan` / `script.json`、镜头台改
+  `shotlist.csv`、台词台改 `asr_*.json`、新建工程写 `project.json`；
+- 所有写回前自动备份，可回滚；
+- `DEEPSEEK_API_KEY` 只从环境变量读，不落盘、不入日志；会话内模式完全不需要它；
+- 剪映草稿默认只写到 `exports/jianying/`，写入剪映目录需单独确认且不覆盖同名。
 
 ## 已知限制
 
-- 逐句确认、块级平移、句级锚点属于**会话状态**（持久化到 `studio_state.json`），重跑 7 步链路会失效。
-- 预览渲染是独立转码，画质上限等于片源；最终成片由 `r7_mux.py` 以 `-c:v copy` 输出，不重编码。
-- 剪映草稿是**单向**的：剪映保存后草稿加密，脚本读不回来；重复导出会覆盖剪映里的人工修改。
-- 镜头表的 `motion / bright` 两列在自动切分时不计算（填 0），只有历史工程自带；校对只用 `ost`。
-- 流水线的「剧情文案 / 三轨校对 / 写回」是人工步骤，页面只给跳转，不代跑；要全自动用 `auto_script.py`（质量会低于人工审）。
-- **剪辑节奏是博主模板**：整镜头选择（全长截 0.8–3.2s、起止吸附镜头边界、一镜只用一次、语音时长驱动），约 29 切/分、单镜中位 2.2s——对齐抖音头部解说博主的节奏（26 切/分、1.6s）。旧 v8 模板的 1.32s 均匀刀已废弃（45 切/分、79% 镜中起刀是"卡顿感"来源）。语速默认 +35%（原 +50%，去尾静音后实际 8.3 字/s 过快）；混音旁白区原声 −16dB ducking（原 −50dB 静音）。
-- **对齐是三层语义的**：句→事件（DeepSeek 配对+跨块覆盖）→镜头（句镜匹配，按镜头描述挑画面）；`relayout_smart` 把音频精确压在该句自己的刀上。没有镜头描述层时退回事件内时序取镜。
-- AI 自动写稿普遍偏保守：整稿 2196 字（预算 1503）→ 压缩到 1268 → 补足到 1325，仍低于 1350 的下限。要达标需要人工加料或调高 `--expand` 阈值。
-- 说话人分离、剧情解析尚未实现。
+- 说话人分离、原声能量/语速特征、数字事实 OCR 交叉校验尚未实现
+  （「十三万点 → 一万三千点」靠人工发现）。
+- `story_parse.py` 段缓存 `seg_XX.json` 仍按文件存在判定；重跑剧情解析时若缓存命中，
+  P0-2 的证据回喂不会进模型，需 `--force`。见 [架构说明 §9](docs/ARCHITECTURE.md)。
+- 剪映草稿是单向的：剪映保存后草稿加密，脚本读不回来。
+- 预览渲染是独立转码，画质上限等于片源；最终成片由 `r7_mux.py` 以 `-c:v copy` 输出。
+- `main` 分支停在检索腿版（旧链），`cut-first` 是当前主线，尚未合回。
+- 图像字幕（蓝光 PGS）暂不支持，自动回退 ASR。

@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：旁白后写 / 写作表导出 ｜ 调用者：cf_pipeline:4; qc_loop ｜ 产物：narration/align/window_table
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """Cut-first 阶段二：旁白后写（narrate-second）。
 
 画面时间轴已由 cutfirst_plan 定型并渲染。本脚本让 LLM **看着已定的输出时间轴**

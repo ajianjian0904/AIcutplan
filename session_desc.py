@@ -1,3 +1,5 @@
+# [L1 会话工具] 职责：会话内读图批次 plan/merge ｜ 调用者：会话内导演 ｜ 产物：json/shots_desc.json
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """会话内视觉描述的批次工具：生成批次清单 + 合并会话产出的 JSON 到 shots_desc.json。
 
 用法：

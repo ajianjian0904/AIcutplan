@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 旧链] 职责：字幕生成 / 烧字幕 ｜ 调用者：pipeline ｜ 产物：out/*.srt
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """字幕：narration.json → out/中文旁白-recap.srt，可选烧进成片
 
 r7_mux 只合画面与音轨，不烧字幕（字幕原本由 r4_script 产出，本工作流跳过了 r4）。

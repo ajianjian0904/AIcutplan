@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L1 新链] 职责：镜头证据回喂上游（零读图） ｜ 调用者：story_parse; causal_graph ｜ 产物：解析/因果 prompt 文本
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """上游证据回喂（P0-2）：把会话内读图产出的镜头证据包聚合给剧情解析 / 因果图谱。
 
 背景：cut-first 下游已有高密度证据（387 镜 desc/depth/facts/dlg + 592 个 2s 窗），
@@ -13,66 +15,21 @@
 from __future__ import annotations
 
 import argparse
-import json
+import sys
 from pathlib import Path
 
-# 情绪 / 转折线索：预算不足时优先保留这类镜头，它们最影响「铺垫 vs 反转」判定
-EMO_KW = ("惊", "怒", "笑", "哭", "沉默", "紧张", "反转", "转折",
-          "爆发", "收束", "伏笔", "震惊", "犹豫", "对峙", "惨叫", "紫光", "数字")
-MAX_LINE = 96
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
+# L0 基础层：证据打分 / 格式化 / 压缩的唯一实现，本模块只保留时间窗编排。
+from aicutplan import evidence as EV          # noqa: E402
+from aicutplan.io import load_json            # noqa: E402
 
-def load_shots(proj_dir) -> list[dict]:
-    """读镜头证据包；不存在或损坏时静默返回空（保持旧行为，向下兼容）。"""
-    p = Path(proj_dir) / "json" / "shots_desc.json"
-    if not p.exists():
-        return []
-    try:
-        rows = json.loads(p.read_text(encoding="utf-8")).get("rows") or []
-    except Exception:
-        return []
-    return [r for r in rows if r.get("desc")]
-
-
-def _score(r: dict) -> float:
-    """证据价值打分：台词 > 情绪/转折 > 帧级事实。"""
-    s = 0.0
-    if r.get("dlg"):
-        s += 2.0
-    t = str(r.get("depth", "")) + str(r.get("desc", ""))
-    s += sum(0.6 for k in EMO_KW if k in t)
-    if r.get("facts"):
-        s += 0.8
-    return s
-
-
-def _line(r: dict) -> str:
-    a, b = float(r.get("a", 0)), float(r.get("b", 0))
-    s = f"{a:.0f}-{b:.0f}s {str(r.get('desc', ''))[:34]}"
-    if r.get("depth"):
-        s += f" ｜{str(r['depth'])[:26]}"
-    if r.get("dlg"):
-        s += f" ｜台词:{str(r['dlg'])[:26]}"
-    if r.get("facts"):
-        facts = []
-        for x in r["facts"][:2]:
-            # 帧事实可能是 {"t": 6.5, "fact": "..."} 或纯字符串
-            facts.append(str(x.get("fact", ""))[:14] if isinstance(x, dict) else str(x)[:14])
-        s += " ｜帧:" + "/".join(f for f in facts if f)
-    return s[:MAX_LINE]
-
-
-def _compact(rows: list[dict], max_rows: int, max_chars: int) -> tuple[str, int]:
-    picked = sorted(rows, key=lambda r: -_score(r))[:max_rows]
-    picked.sort(key=lambda r: float(r.get("a", 0)))
-    out, total = [], 0
-    for r in picked:
-        ln = _line(r)
-        if total + len(ln) + 1 > max_chars:
-            break
-        out.append(ln)
-        total += len(ln) + 1
-    return "\n".join(out), len(out)
+load_shots = EV.load_shots                    # 兼容别名
+_score = EV.score_shot
+_line = EV.format_shot_line
+_compact = EV.compact
 
 
 def segment_brief(proj_dir, a: float, b: float,
@@ -128,7 +85,7 @@ def main() -> int:
     a = ap.parse_args()
     proj_dir = Path(a.project).expanduser().resolve().parent
     plan_p = proj_dir / "json" / "story_plan.json"
-    plan = json.loads(plan_p.read_text(encoding="utf-8")) if plan_p.exists() else {}
+    plan = load_json(plan_p, default={}) or {}
     seg_sec = float(plan.get("segment") or 200.0)
     src = 0.0
     for key in ("src_dur", "source_dur"):
@@ -138,7 +95,7 @@ def main() -> int:
     if src <= 0:
         pj = proj_dir / "project.json"
         if pj.exists():
-            cfg = json.loads(pj.read_text(encoding="utf-8"))
+            cfg = load_json(pj, default={}) or {}
             src = float(cfg.get("recap", {}).get("src_dur") or cfg.get("src_dur") or 0)
     shots = load_shots(proj_dir)
     last_shot = max((float(r["b"]) for r in shots), default=0.0)

@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：句级锚点 + 人物台词联动数据层 ｜ 调用者：server; review ｜ 产物：库
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """句级锚点 + 人物台词联动（纯数据层，不改任何工程文件）
 
 设计依据（SKILL.md 四集实测）：

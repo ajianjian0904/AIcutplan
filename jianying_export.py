@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+# [L3 界面层] 职责：剪映草稿导出 ｜ 调用者：server ｜ 产物：exports/jianying
+# 分层与依赖全表见 docs/ARCHITECTURE.md
 """剪映草稿导出（单向）：工程时间线 → 剪映可打开的明文草稿。
 
 设计边界（已在本机剪映 11.8 核实）：
