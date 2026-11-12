@@ -90,7 +90,7 @@ AIcutplan/
 │   │
 │   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
 │   │   ├── narration.py           LLM 客户端 / 预算门禁 / 模板 / drafts
-│   │   ├── story_parse.py         事件表 / 块表 / 段缓存 + 证据回喂
+│   │   ├── story_parse.py         事件表 / 块表 / 段缓存（内容指纹）+ 证据回喂
 │   │   ├── smart_align.py         shots_of / _load / 旧句级对齐
 │   │   ├── asr_pipeline.py        译中缓存 asr/<pkey>/（断点续传）
 │   │   └── evidence_feed.py       镜头证据聚合（story_parse / causal_graph 的库）

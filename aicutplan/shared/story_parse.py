@@ -291,16 +291,47 @@ def _json_array(text: str) -> list:
 # --------------------------------------------------------------------------
 # ① 分段解析
 # --------------------------------------------------------------------------
+#: 段缓存版本：改动 prompt / 解析口径时 +1，旧缓存自动失效
+CACHE_VER = 2
+
+
+def _seg_sig(proj_dir, seg: dict, lines: str, frames: int, model) -> str:
+    """段解析的输入指纹：区间 + 帧数 + 模型 + 台词 + 镜头/场景证据。
+
+    旧实现只看 ``seg_NN.json 是否存在`` —— 改了台词或重跑了镜头描述，仍会命旧结果。
+    """
+    from aicutplan import cache as CL
+    j = Path(proj_dir) / "json"
+    return CL.content_sig(
+        f"segv{CACHE_VER}", seg["a"], seg["b"], frames, model or "", lines,
+        CL.file_sig(j / "shots_desc.json"), CL.file_sig(j / "scene_desc.json"),
+    )
+
+
+def _seg_cache_hit(cache_f: Path, data: dict, sig: str, proj_dir) -> bool:
+    """缓存是否可用：有指纹按指纹；旧缓存无指纹时，只在比输入新时沿用一次。"""
+    if not data.get("events"):
+        return False
+    got = data.get("cache_sig")
+    if got:
+        return got == sig
+    from aicutplan import cache as CL
+    j = Path(proj_dir) / "json"
+    srcs = [j / n for n in ("ja-segments.json", "shots_desc.json", "scene_desc.json")]
+    return not CL.is_stale(cache_f, [p for p in srcs if p.exists()])
+
+
 def parse_segment(proj_dir, seg: dict, model=None, force=False, frames: int = 12) -> dict:
     cache_f = workdir(proj_dir) / f"seg_{seg['i']:02d}.json"
+    subs = [s for s in zh_subtitles(proj_dir) if seg["a"] - 0.01 <= s["t0"] < seg["b"]]
+    lines = "\n".join(f"[{s['t0']:.1f}-{s['t1']:.1f}] {s['text']}" for s in subs) or "（这一段没有台词）"
+    sig = _seg_sig(proj_dir, seg, lines, frames, model)
     if cache_f.exists() and not force:
         d = read_json(cache_f, {}) or {}
-        if d.get("events"):
+        if _seg_cache_hit(cache_f, d, sig, proj_dir):
             print(f"[剧情] 段 {seg['i'] + 1} 命中缓存（{len(d['events'])} 事件）", flush=True)
             return d
 
-    subs = [s for s in zh_subtitles(proj_dir) if seg["a"] - 0.01 <= s["t0"] < seg["b"]]
-    lines = "\n".join(f"[{s['t0']:.1f}-{s['t1']:.1f}] {s['text']}" for s in subs) or "（这一段没有台词）"
     imgs = seg_frames(proj_dir, seg, frames)
     if not imgs:
         raise RuntimeError("抽帧失败：源片不存在或 ffmpeg 不可用")
@@ -322,6 +353,7 @@ def parse_segment(proj_dir, seg: dict, model=None, force=False, frames: int = 12
         raise RuntimeError("模型返回空（推理 token 用尽），把 max_tokens 调大或缩短分段")
     events = _json_array(r["text"])
     data = {"seg": seg, "events": events, "usage": r["usage"], "model": r["model"],
+            "cache_sig": sig,
             "elapsed": round(time.time() - t0, 1), "at": datetime.now().isoformat(timespec="seconds")}
     cache_f.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
     print(f"[剧情] 段 {seg['i'] + 1} 完成：{len(events)} 事件 · {data['elapsed']}s · "
