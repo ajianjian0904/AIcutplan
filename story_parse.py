@@ -29,7 +29,9 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # 被其它脚本 import 时也能找到同目录模块
 import narration as NR
+import evidence_feed as EF   # P0-2：已有镜头证据包回喂上游（零新增抽帧/读图）
 
 ROOT = Path(__file__).resolve().parent
 CACHE = ROOT / "cache" / "story"
@@ -301,9 +303,17 @@ def parse_segment(proj_dir, seg: dict, model=None, force=False, frames: int = 12
     if not imgs:
         raise RuntimeError("抽帧失败：源片不存在或 ffmpeg 不可用")
     q = SEG_Q.format(lines=lines, n=len(imgs), a=seg["a"], b=seg["b"])
+    # P0-2 上游证据回喂：12 张均匀截图看不全，补上该段每个镜头的结构化描述
+    brief, st = EF.segment_brief(proj_dir, float(seg["a"]), float(seg["b"]))
+    if brief:
+        q += ("\n\n【镜头证据包（会话内读图产出 · 每镜的客观描述 / 叙事功能 / 台词）】\n"
+              + brief + "\n\n注意：上面的截图是均匀抽帧，只覆盖少数时刻；镜头证据包覆盖本段"
+              "每一个镜头。判断事件边界、铺垫与反转时以证据包为准，不要把截图没拍到"
+              "的内容当成没发生，也不要凭截图脑补后续剧情。")
     labeled = [(f"源片第 {int(t)} 秒：", p) for t, p in imgs]
     print(f"[剧情] 段 {seg['i'] + 1}/{seg['n']} · {seg['a']:.0f}–{seg['b']:.0f}s · "
-          f"{len(subs)} 句台词 · {len(imgs)} 帧 → 请求中（推理模型，约 1–3 分钟）", flush=True)
+          f"{len(subs)} 句台词 · {len(imgs)} 帧 · 镜头证据 {st['kept']}/{st['shots']} 镜 "
+          f"({st['chars']} 字) → 请求中", flush=True)
     t0 = time.time()
     r = vision_chat(SEG_SYS, q, labeled, model=model, max_tokens=9000)
     if not r["text"].strip():
@@ -315,6 +325,86 @@ def parse_segment(proj_dir, seg: dict, model=None, force=False, frames: int = 12
     print(f"[剧情] 段 {seg['i'] + 1} 完成：{len(events)} 事件 · {data['elapsed']}s · "
           f"{r['usage'].get('total_tokens')} tokens", flush=True)
     return data
+
+
+def evidence_block(proj_dir, a: float, b: float) -> str:
+    """P0-2：把该段镜头证据拼到 prompt 末尾（无证据时返回空，保持旧行为）。"""
+    brief, _ = EF.segment_brief(proj_dir, a, b)
+    if not brief:
+        return ""
+    return ("\n\n【镜头证据包（会话内读图产出 · 每镜的客观描述 / 叙事功能 / 台词）】\n"
+            + brief + "\n\n注意：上面的截图是均匀抽帧，只覆盖少数时刻；镜头证据包覆盖本段"
+            "每一个镜头。判断事件边界、铺垫与反转时以证据包为准，不要把截图没拍到"
+            "的内容当成没发生，也不要凭截图脑补后续剧情。")
+
+
+def export_prompts(proj_dir, seg_sec: float = 180.0, frames: int = 12) -> Path:
+    """零 API 模式：导出每段完整 prompt（台词 + 截图清单 + 镜头证据）供会话内分析。
+
+    会话内按 SEG_Q 的格式产出事件数组，写成 seg_XX.events.json，再用
+    --import-segments 回写段缓存与事件表。
+    """
+    segs = segments(proj_dir, seg_sec)
+    for s in segs:
+        s["n"] = len(segs)
+    out = proj_dir / "json" / "session_prompts"
+    out.mkdir(parents=True, exist_ok=True)
+    for s in segs:
+        subs = [x for x in zh_subtitles(proj_dir)
+                if s["a"] - 0.01 <= x["t0"] < s["b"]]
+        lines = "\n".join(f"[{x['t0']:.1f}-{x['t1']:.1f}] {x['text']}" for x in subs) or "（这一段没有台词）"
+        imgs = seg_frames(proj_dir, s, frames)
+        q = SEG_Q.format(lines=lines, n=len(imgs), a=s["a"], b=s["b"])
+        q += evidence_block(proj_dir, float(s["a"]), float(s["b"]))
+        (out / f"seg_{s['i']:02d}_prompt.txt").write_text(SEG_SYS + "\n\n" + q,
+                                                          encoding="utf-8")
+        (out / f"seg_{s['i']:02d}_images.txt").write_text(
+            "\n".join(f"{t:.1f}s\t{p}" for t, p in imgs), encoding="utf-8")
+    (out / "说明.txt").write_text(
+        "逐段读 prompt + 对应图片清单（会话内可直接读图），按 SEG_Q 要求输出事件数组，\n"
+        "保存为同目录 seg_XX.events.json（JSON 数组，或 {\"events\": [...]}）。\n"
+        "然后：python story_parse.py --project <pj> --import-segments <本目录>\n"
+        "注意：导入会重建 story_plan.events，旧 causal / blocks / 句窗映射会失效，\n"
+        "务必只在新工程或工程副本上做，不要对已定型的成片工程直接跑。\n", encoding="utf-8")
+    print(f"[剧情·会话内] 导出 {len(segs)} 段 prompt → {out}")
+    return out
+
+
+def import_segments(proj_dir, src: Path) -> int:
+    """把会话内产出的分段事件写回段缓存 + story_plan.events（会先备份）。"""
+    import re as _re
+    files = sorted(src.glob("seg_*.events.json"))
+    if not files:
+        print(f"[剧情·导入] {src} 下没有 seg_*.events.json")
+        return 2
+    events = []
+    for f in files:
+        m = _re.search(r"seg_(\d+)", f.name)
+        si = int(m.group(1)) if m else 0
+        try:
+            arr = json.loads(f.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"[剧情·导入] 跳过坏文件 {f.name}: {e}")
+            continue
+        rows = arr if isinstance(arr, list) else (arr.get("events") or [])
+        for e in rows:
+            events.append({**e, "seg": si})
+        # 同步写段缓存，下次 parse_segment 会命中
+        cf = workdir(proj_dir) / f"seg_{si:02d}.json"
+        cf.parent.mkdir(parents=True, exist_ok=True)
+        cf.write_text(json.dumps({"seg": {"i": si}, "events": rows,
+                                  "source": "session-import"}, ensure_ascii=False, indent=1),
+                      encoding="utf-8")
+    events = _fix_events(events)
+    plan = load_plan(proj_dir)
+    bak = proj_dir / "json" / "story_plan.json.bak_evidence"
+    if not bak.exists():
+        bak.write_text(json.dumps(plan, ensure_ascii=False, indent=1), encoding="utf-8")
+    plan["events"] = events
+    save_plan(proj_dir, plan)
+    print(f"[剧情·导入] {len(files)} 段 → {len(events)} 事件；原事件表备份 {bak.name}")
+    print("  后续：--compose-only 重建块表 → 重跑 causal_graph / cutfirst_plan（旧映射需重建）")
+    return 0
 
 
 def run_parse(proj_dir, seg_sec: float = 180.0, model=None, force=False, frames: int = 12) -> dict:
@@ -565,9 +655,22 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--write-script", action="store_true", help="写 script.json 块骨架")
     ap.add_argument("--overwrite", action="store_true", help="允许覆盖已有 script.json（会备份）")
     ap.add_argument("--write-cutplan", action="store_true", help="生成初版 cutplan")
+    ap.add_argument("--export-prompt", action="store_true",
+                    help="零 API：导出每段完整 prompt（含镜头证据）供会话内分析")
+    ap.add_argument("--import-segments", default=None,
+                    help="导入会话内产出的 seg_*.events.json 目录，重建事件表（会备份）")
     a = ap.parse_args(argv)
 
     proj_dir = Path(a.project).expanduser().resolve().parent
+    # 会话内模式：不读 llm_config、不调 API，处理完直接返回
+    if a.export_prompt or a.import_segments:
+        if a.export_prompt:
+            export_prompts(proj_dir, seg_sec=a.segment, frames=a.frames)
+        if a.import_segments:
+            rc = import_segments(proj_dir, Path(a.import_segments).expanduser().resolve())
+            if rc:
+                return rc
+        return 0
     print(f"[剧情] 工程 {proj_dir.name} · 模型 {a.model or NR.llm_config()['model']}", flush=True)
 
     plan = load_plan(proj_dir)
