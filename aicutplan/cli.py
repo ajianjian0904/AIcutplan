@@ -40,7 +40,7 @@ SCRIPTS = {
 }
 
 # 这些子命令由本包直接实现，不启子进程
-DIRECT = ("check", "lint", "version", "lib", "runs")
+DIRECT = ("check", "lint", "version", "lib", "runs", "clean")
 
 
 def _library(argv: list[str]) -> int:
@@ -169,6 +169,93 @@ def _runs(argv: list[str]) -> int:
     return 0
 
 
+def _mb(n: int) -> str:
+    """人类可读体积（MB/GB，一位小数）。"""
+    if n >= 1 << 30:
+        return f"{n / (1 << 30):.2f}GB"
+    return f"{n / (1 << 20):.1f}MB"
+
+
+def _clean(argv: list[str]) -> int:
+    """冗余清理：旧版成片 / 备份 / 过期帧 / 可再生中间物 → .trash（可恢复）。"""
+    from . import clean as CL
+
+    ap = argparse.ArgumentParser(
+        prog="aicutplan clean",
+        description="工程冗余清理：默认只扫描；--apply 移入 .trash；--empty 真正释放",
+    )
+    ap.add_argument("--project", required=True, help="project.json 或其所在目录")
+    ap.add_argument("--deep", action="store_true", help="连同可再生的中间大件一起收")
+    ap.add_argument("--apply", action="store_true", help="执行（默认只列清单）")
+    ap.add_argument("--category", action="append", default=[], choices=list(CL.CATEGORIES),
+                    help="只清理指定类别，可多次")
+    ap.add_argument("--restore", action="store_true", help="把最近一批从 .trash 放回")
+    ap.add_argument("--batch", default="", help="配合 --restore 指定批次目录名")
+    ap.add_argument("--empty", action="store_true", help="清空 .trash（不可恢复）")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+
+    if a.restore:
+        r = CL.restore(a.project, batch=a.batch)
+        if a.json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+            return 0
+        if not r["batch"]:
+            print("[clean] 回收站为空，无需恢复")
+            return 0
+        print(f"[clean] 已从 .trash/{r['batch']} 放回 {r['restored']} 项")
+        for x in r["conflicts"]:
+            print(f"  ! 目标已存在，保留在回收站：{x}")
+        for x in r["missing"]:
+            print(f"  ! 清单有、文件已不在：{x}")
+        return 0
+
+    if a.empty:
+        e = CL.empty(a.project)
+        if a.json:
+            print(json.dumps(e, ensure_ascii=False, indent=1))
+            return 0
+        print(f"[clean] 已清空 .trash：{e['batches']} 批 / 释放 {_mb(e['bytes'])}")
+        return 0
+
+    rep = CL.clean(a.project, apply=a.apply, deep=a.deep,
+                   categories=a.category or None)
+    if a.json:
+        print(json.dumps(rep, ensure_ascii=False, indent=1))
+        return 0
+
+    items, sm = rep["items"], rep["summary"]
+    head = "清理" if a.apply else "清理扫描"
+    print(f"[{head}] {Path(a.project).expanduser().resolve()}")
+    if not items:
+        print("  没有可回收的冗余（--deep 可连同可再生的中间大件一起看）")
+        return 0
+    shown = 0
+    for cat, desc in CL.CATEGORIES.items():
+        row = sm["per"].get(cat)
+        if not row:
+            continue
+        print(f"  {desc:<18} {row['count']:>3} 个  {_mb(row['bytes']):>9}")
+        if shown < 40:
+            for it in [x for x in items if x["category"] == cat][:8]:
+                print(f"      {it['rel']:<52} {_mb(it['bytes']):>9}")
+                shown += 1
+    print(f"  合计 {sm['count']} 个 / {_mb(sm['bytes'])}")
+    if not a.apply:
+        print("  （预览，未改动任何文件）")
+        print(f"  → 收走：aicutplan clean --project {a.project} --apply"
+              + (" --deep" if a.deep else ""))
+        return 0
+    print(f"[clean] 已移入 .trash/{rep['batch']}：{rep['moved']} 项 / {_mb(rep['bytes'])}")
+    if rep["failed"]:
+        for x in rep["failed"][:10]:
+            print("  ! " + x)
+        print(f"  ! {len(rep['failed'])} 项移动失败（仍留在原处）")
+    print(f"  可恢复：aicutplan clean --project {a.project} --restore")
+    print(f"  真释放：aicutplan clean --project {a.project} --empty")
+    return 1 if rep["failed"] else 0
+
+
 def _delegate(name: str, args: list[str]) -> int:
     target = script(SCRIPTS[name])
     if not target.exists():
@@ -247,6 +334,8 @@ def main(argv: list[str] | None = None) -> int:
         return _library(a.rest)
     if a.command == "runs":
         return _runs(a.rest)
+    if a.command == "clean":
+        return _clean(a.rest)
     if a.command in ("check", "lint"):
         # 从透传参数里取 --project
         project = None

@@ -84,6 +84,7 @@ AIcutplan/
 │   ├── evidence.py                load_shots / score_shot / format_shot_line / compact
 │   ├── config.py                  配置目录解析 / 容错读写 / 环境变量覆盖（config/ 优先）
 │   ├── workspace.py               作品库布局 / runs 版本快照 / latest 指针 / 污染扫描 / 迁移
+│   ├── clean.py                   冗余盘点与可恢复回收（.trash 批次 + manifest + restore）
 │   ├── cli.py + __main__.py       L2 门面：python -m aicutplan <cmd>
 │   │
 │   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
@@ -166,6 +167,8 @@ AIcutplan/
 | `subtitles` | `probe_subs` / `clean_text` / `parse_srt` / `merge_same_time` / `sniff_lang` / `norm` | subs_extract、asr_local、cf_pipeline、tests |
 | `planning` | `pick_hook_clip` / `hook_score` / `weight` / `reason` / `is_continuous` | cutfirst_plan、tests |
 | `evidence` | `load_shots` / `score_shot` / `format_shot_line` / `compact` | evidence_feed、tests |
+| `workspace` | `library_root` / `snapshot` / `latest` / `verify_run` / `scan_stale` / `migrate` | cli `lib`/`runs`、cf_pipeline、qc_loop、clean |
+| `clean` | `scan` / `clean` / `restore` / `empty` / `trash_stats` | cli `clean` |
 | `cli` | `main()` | `python -m aicutplan` / `aicutplan` 控制台脚本 |
 
 **约定**：阶段脚本里若仍保留 `parse_srt`、`_score`、`lint_narration` 等名字，那是
@@ -191,6 +194,15 @@ AIcutplan/
   备份堆积」，`cf_pipeline` 每次生成前打印，`lib list` 每集显示告警数。
 - **迁移**：`migrate()` 默认硬链接复制、`--move` 同盘改名，并重写 `project.json`
   的 `workdir`；目标已存在即报错，不覆盖。
+
+### 冗余清理（`aicutplan/clean.py`）
+
+`scan_stale()` 只报警，`clean` 负责收走：默认扫 `out/03-*` 旧版成片与同内容副本、
+`*.bak_*`/`*.v3bak`、`tts_v31_backup/`、早于成片的 `.qcframes/qc_*.jpg` 与
+`verify/chk_*.wav`；`--deep` 追加 `verify/rapid_seg/`、`out/01-*`、`out/02-*`、
+`mix-*.wav`、`audio/base-*.wav`（均可再生）。两段式：`--apply` 进 `.trash/<批次>/`
+并写清单，`--restore` 放回（冲突不覆盖），`--empty` 才真正释放。
+`project.json`、`json/`、`tts/`、`runs/` 永不入候选集。
 
 ### 配置解析（`aicutplan/config.py`）
 

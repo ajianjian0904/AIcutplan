@@ -37,6 +37,7 @@ python -m aicutplan subs --project <pj> --apply --refresh-derived   # 内嵌字�
 python -m aicutplan run  --project <pj> --sentences sents.json      # 一键主链
 python -m aicutplan qc   --project <pj> --plan 6                    # 会话内质检批次
 python -m aicutplan check --project <pj>                            # 工程体检
+python -m aicutplan clean --project <pj>                            # 冗余清单（--apply 回收）
 python -m aicutplan serve                                           # web 台
 ```
 
@@ -141,6 +142,20 @@ python -m aicutplan runs verify --project <pj>   # 校验该 run 全部产物
    旧音频、早于成片的旧质检帧（只告警不阻断）；
 3. TTS 音频带内容指纹（`mp3_sig`），r5 合成时写入，扫描按指纹核对而不是 mtime；
 4. 多集并行：不同集是独立目录，各自 `cf_pipeline` 互不干扰；同集同时只跑一个渲染。
+
+**清理冗余**（旧版成片 / 备份 / 过期质检帧 / 可再生中间物）：
+
+```bash
+python -m aicutplan clean --project <pj>            # 只列清单（默认不改文件）
+python -m aicutplan clean --project <pj> --apply    # 移入 <工程>/.trash/<批次>/（可恢复）
+python -m aicutplan clean --project <pj> --restore  # 放回最近一批（冲突不覆盖）
+python -m aicutplan clean --project <pj> --empty    # 清空 .trash，真正释放空间
+python -m aicutplan clean --project <pj> --deep     # 连同可再生的中间大件一起看
+```
+
+`project.json`、`json/` 当前产物、`tts/` 当前音频、`runs/` 归档永不进入候选集；
+`--deep` 才涉及 `out/01-*`、`out/02-*`、`mix-*.wav`、`audio/base-*.wav`、
+`verify/rapid_seg/`（都能重跑生成，但重跑要花时间，按需选）。
 
 当前 EP01 已迁入：`E:/workbuddy/漫剪作品库/被驱逐的加强师/EP01`（迁移会重写
 `project.json` 的 `workdir`；web 台工程指向已同步）。

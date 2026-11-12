@@ -5,6 +5,35 @@
 
 ---
 
+## v0.9.0 · 2026-11-12 — 冗余清理（clean）：旧版成片 / 备份 / 过期帧 / 可再生中间物
+
+**新增**
+- `aicutplan/clean.py`（L0）：按白名单规则盘点并回收工程冗余 ——
+  `old_final`（out/03-* 旧版成片）、`dup_final`（与最新归档同内容的副本）、
+  `backup`（`*.bak_*` / `*.v3bak`）、`backup_dir`（`tts_v31_backup/`）、
+  `qc_frame`（早于成片的 `.qcframes/qc_*.jpg`）、`verify_wav`（旧校验 wav）；
+  `--deep` 再加 `deep_seg`（`verify/rapid_seg/`）与 `deep_mid`
+  （`out/01-*`、`out/02-*`、`mix-*.wav`、`audio/base-*.wav`）。
+- **两段式安全回收**：默认只扫描；`--apply` 移入 `<工程>/.trash/<批次>/` 并写
+  `manifest.json`（含原路径与体积），`--restore [--batch]` 原样放回、
+  冲突时不覆盖；`--empty` 才真正释放。`project.json` / `json/` / `tts/` / `runs/`
+  永不在候选集内。
+- CLI 新命令 `clean`：`--project`（必填）、`--deep`、`--apply`、`--category`、
+  `--restore`、`--batch`、`--empty`、`--json`。
+
+**清理**
+- `aicutplan/__init__.py` 的分层说明是目录分层前的旧版（称「阶段脚本在根目录」），
+  已改写为当前 `shared/chain/session/legacy/webui` 结构与依赖方向；版本号
+  与 `pyproject.toml` 统一为 0.9.0（此前停留 0.6.0，与 CHANGELOG 脱节）。
+- EP01 首次清理：149 项 / 632.4MB 移入 `.trash`（6 个旧版成片、1 个 v35 副本、
+  41 个备份文件、`tts_v31_backup/`、96 张过期质检帧、4 个旧校验 wav）。
+  清理后 `check` 全过、`runs verify` 指纹一致；`--deep` 另有 1.24GB 可再生中间物待定。
+
+**验证**
+- 新增 `tests/test_clean.py` 16 项；全套 182 项全绿（跳过 1）。
+
+---
+
 ## v0.8.0 · 2026-11-12 — 作品库布局 + 生成版本（runs）隔离
 
 **新增**
