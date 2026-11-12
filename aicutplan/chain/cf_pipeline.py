@@ -34,6 +34,36 @@ def run(cmd: list[str], cwd: Path | None = None) -> bool:
     return r.returncode == 0
 
 
+def _stamp(proj_dir, stage: str) -> None:
+    """记录本阶段「输入 → 产物」的内容指纹基线（渲染门禁用）。"""
+    try:
+        from aicutplan import freshness as FR
+        FR.stamp(proj_dir, stage)
+    except Exception as e:
+        print(f"[渲染门禁] 基线写入失败（{stage}）：{type(e).__name__} {e}", flush=True)
+
+
+def _gate(proj_dir, stage: str, allow_stale: bool) -> bool:
+    """渲染前强制校验：上游产物是否由当前输入生成。"""
+    try:
+        from aicutplan import freshness as FR
+    except Exception:
+        return True
+    ok, issues = FR.render_ready(proj_dir, stage)
+    if ok:
+        print(f"[渲染门禁] {stage} 前置通过：上游产物均为当前输入生成", flush=True)
+        return True
+    print(f"[渲染门禁] {stage} 前置未通过：", flush=True)
+    for x in issues:
+        print("  ! " + x, flush=True)
+    if allow_stale:
+        print("[渲染门禁] --allow-stale：继续渲染，成片可能混入旧素材", flush=True)
+        return True
+    print("[渲染门禁] 已阻断。补跑上面提示的阶段后重试；"
+          "确需强行出片加 --allow-stale", flush=True)
+    return False
+
+
 def lint_narration(proj_dir: Path) -> list[str]:
     """TTS 前规则 lint —— 薄委托到 L0 数据契约层。
 
@@ -84,12 +114,14 @@ def main() -> int:
     ap.add_argument("--no-snapshot", action="store_true",
                     help="渲染成功后不归档到 runs/（默认自动归档并更新 latest）")
     ap.add_argument("--label", default="", help="本次归档标签，如 v36（默认按时间）")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="渲染前门禁不通过也继续（成片会混入旧素材，不推荐）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
     PY = sys.executable
 
-    # 生成前污染扫描：旧 TTS / 旧质检帧 / 归档后未归档改动（只告警，不阻断）
+    # 生成前污染扫描：旧 TTS / 旧质检帧 / 归档后未归档改动（只告警；真正的阻断在渲染前的 freshness 门禁）
     try:
         from aicutplan import workspace as WS
         warns = [w for w in WS.scan_stale(proj_dir)
@@ -147,6 +179,7 @@ def main() -> int:
         # 2) 无声粗剪（工程脚本）
         if not run([PY, str(proj_dir / "cut.py"), "--project", str(pj), "--force"], cwd=proj_dir):
             return 2
+        _stamp(proj_dir, "cut")
     # 3) 旁白后写（会话模式 / API 模式）
     cmd = [PY, str(ROOT / "aicutplan" / "chain" / "narrate_cut.py"), "--project", str(pj)]
     if a.sentences:
@@ -167,12 +200,19 @@ def main() -> int:
             return 2
         if not run([PY, str(ROOT / "aicutplan" / "chain" / "elastic_fit.py"), "--project", str(pj)]):
             return 2
-    # 6) 混音 + 合流
+        _stamp(proj_dir, "tts")
+    # 6) 混音 + 合流（渲染前门禁：上游必须由当前输入生成）
     if not a.skip_render:
+        if not _gate(proj_dir, "mix", a.allow_stale):
+            return 4
         if not run([PY, str(proj_dir / "r6_mix.py"), "--project", str(pj)], cwd=proj_dir):
             return 2
+        _stamp(proj_dir, "mix")
+        if not _gate(proj_dir, "mux", a.allow_stale):
+            return 4
         if not run([PY, str(proj_dir / "r7_mux.py"), "--project", str(pj)], cwd=proj_dir):
             return 2
+        _stamp(proj_dir, "mux")
     if a.qc:
         if not run([PY, str(ROOT / "aicutplan" / "chain" / "qc_visual.py"), "--project", str(pj),
                     "--plan", str(a.qc_per_batch)]):

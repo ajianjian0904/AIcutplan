@@ -161,6 +161,11 @@ def main() -> int:
     if over_list:
         print(f"质检清单（需改词）：{over_list[:10]}")
     print(f"→ qc_report.json / tts-result.json 已更新")
+    # 配音阶段的最后一棒：登记「旁白/音色 → mp3 + tts-result」基线，供渲染门禁比对
+    try:
+        common.stamp(ctx, "tts")
+    except Exception as e:
+        print(f"[渲染门禁] 基线写入失败（tts）：{type(e).__name__} {e}")
     return 0
 
 

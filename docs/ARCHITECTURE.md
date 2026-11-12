@@ -85,6 +85,7 @@ AIcutplan/
 │   ├── config.py                  配置目录解析 / 容错读写 / 环境变量覆盖（config/ 优先）
 │   ├── workspace.py               作品库布局 / runs 版本快照 / latest 指针 / 污染扫描 / 迁移
 │   ├── clean.py                   冗余盘点与可恢复回收（.trash 批次 + manifest + restore）
+│   ├── freshness.py               渲染门禁：四阶段内容指纹基线（render_state.json）
 │   ├── cli.py + __main__.py       L2 门面：python -m aicutplan <cmd>
 │   │
 │   ├── shared/                    L1 共享库（新旧两链共依赖；只许依赖 L0）
@@ -169,6 +170,7 @@ AIcutplan/
 | `evidence` | `load_shots` / `score_shot` / `format_shot_line` / `compact` | evidence_feed、tests |
 | `workspace` | `library_root` / `snapshot` / `latest` / `verify_run` / `scan_stale` / `migrate` | cli `lib`/`runs`、cf_pipeline、qc_loop、clean |
 | `clean` | `scan` / `clean` / `restore` / `empty` / `trash_stats` | cli `clean` |
+| `freshness` | `check` / `blocking` / `render_ready` / `stamp` / `bootstrap` | cli `guard`、cf_pipeline、qc_loop、工程侧 r6·r7 |
 | `cli` | `main()` | `python -m aicutplan` / `aicutplan` 控制台脚本 |
 
 **约定**：阶段脚本里若仍保留 `parse_srt`、`_score`、`lint_narration` 等名字，那是
@@ -194,6 +196,20 @@ AIcutplan/
   备份堆积」，`cf_pipeline` 每次生成前打印，`lib list` 每集显示告警数。
 - **迁移**：`migrate()` 默认硬链接复制、`--move` 同盘改名，并重写 `project.json`
   的 `workdir`；目标已存在即报错，不覆盖。
+
+### 渲染门禁（`aicutplan/freshness.py`）
+
+四阶段有向依赖：`cut ← cutplan/ja-segments/01`、`tts ← narration/音色语速`、
+`mix ← narration/tts-result/cutplan/base-rapid/全部 mp3`、`mux ← mix/02/cutplan/narration`。
+每步成功后把输入指纹写进 `json/render_state.json`，判新时重算比对：
+
+- 一致 → 产物就是这批输入生成的，忽略 mtime（解决「补指纹/重写元数据」导致的误报）；
+- 有差异 → 指名哪个输入变了、该补跑哪一步；
+- 无基线 → 判 `unknown`，渲染门禁不放行，`guard --bootstrap` 建基线。
+
+渲染入口（`cf_pipeline`、`qc_loop`、工程侧 `r6/r7`）在动手前调用 `render_ready()`，
+不通过即阻断（`--allow-stale` 可显式放行）。这是「不让旧产物混进成片」的最后一道闸，
+与 `workspace.scan_stale` 的告警、`clean` 的清理互为补充。
 
 ### 冗余清理（`aicutplan/clean.py`）
 

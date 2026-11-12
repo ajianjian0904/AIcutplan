@@ -40,7 +40,7 @@ SCRIPTS = {
 }
 
 # 这些子命令由本包直接实现，不启子进程
-DIRECT = ("check", "lint", "version", "lib", "runs", "clean")
+DIRECT = ("check", "lint", "version", "lib", "runs", "clean", "guard")
 
 
 def _library(argv: list[str]) -> int:
@@ -256,6 +256,63 @@ def _clean(argv: list[str]) -> int:
     return 1 if rep["failed"] else 0
 
 
+def _guard(argv: list[str]) -> int:
+    """渲染门禁：判定四步产物是否由「当前输入」生成（内容指纹基线）。"""
+    from . import freshness as FR
+
+    ap = argparse.ArgumentParser(
+        prog="aicutplan guard",
+        description="渲染门禁：检查画面/配音/混音/成片是否最新（不通过则渲染应被阻断）",
+    )
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--stage", choices=["mix", "mux", "all"], default="all",
+                    help="要放行的渲染步骤（默认 all：mix 与 mux 都必须过）")
+    ap.add_argument("--bootstrap", action="store_true",
+                    help="为已有工程建立基线（默认只盖 mtime 粗判没问题的阶段）")
+    ap.add_argument("--force", action="store_true",
+                    help="配合 --bootstrap：无条件盖章（已用其它手段证明产物可用时）")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+
+    if a.bootstrap:
+        r = FR.bootstrap(a.project, force=a.force)
+        if a.json:
+            print(json.dumps(r, ensure_ascii=False, indent=1))
+            return 0
+        print(f"[guard] 已建立基线：{', '.join(r['stamped']) or '（无）'}")
+        if r["skipped"]:
+            print(f"  跳过（mtime 粗判显示上游更新）：{', '.join(r['skipped'])}"
+                  f"  确认产物可用后加 --force")
+        return 0
+
+    rows = FR.check(a.project)
+    gates = ["mix", "mux"] if a.stage == "all" else [a.stage]
+    issues = {g: FR.blocking(a.project, g) for g in gates}
+    if a.json:
+        print(json.dumps({"rows": rows, "gates": issues}, ensure_ascii=False, indent=1))
+        return 0 if not any(issues.values()) else 1
+
+    print(f"[渲染门禁] {Path(a.project).expanduser().resolve()}")
+    mark = {"fresh": "OK  ", "stale": "STALE", "unknown": "未知"}
+    for r in rows:
+        line = f"  {mark.get(r['status'], r['status']):<5} {FR.STAGE_CN[r['stage']]}"
+        if r["status"] == "fresh":
+            line += f" · {r['detail']}"
+        else:
+            line += f" · {r['detail']}  → {r['fix']}"
+        print(line)
+    for g in gates:
+        head = "通过" if not issues[g] else "未通过（渲染会被阻断）"
+        print(f"  [{g}] {head}")
+        for x in issues[g]:
+            print(f"      ! {x}")
+    if all(not v for v in issues.values()):
+        print("  → 可以渲染：成片将只使用当前这批产物")
+        return 0
+    print("  → 先补跑上面提示的阶段；确认要强行出片时用 --allow-stale（会混入旧素材）")
+    return 1
+
+
 def _delegate(name: str, args: list[str]) -> int:
     target = script(SCRIPTS[name])
     if not target.exists():
@@ -336,6 +393,8 @@ def main(argv: list[str] | None = None) -> int:
         return _runs(a.rest)
     if a.command == "clean":
         return _clean(a.rest)
+    if a.command == "guard":
+        return _guard(a.rest)
     if a.command in ("check", "lint"):
         # 从透传参数里取 --project
         project = None

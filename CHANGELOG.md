@@ -5,6 +5,36 @@
 
 ---
 
+## v0.9.1 · 2026-11-13 — 渲染门禁：保证成片只用「当前输入」生成的产物
+
+**新增**
+- `aicutplan/freshness.py`（L0）：四阶段（cut / tts / mix / mux）的**内容指纹基线**。
+  每步产出后把「它读到的输入」记进 `json/render_state.json`；判新时重算输入指纹
+  逐项比对 —— 一致即证明产物由当前输入生成，不靠 mtime 猜。
+  单句重配还额外核对 `mp3_sig` 与旁白文字，抓「元数据新、音频旧」。
+- CLI 新命令 `guard`：`--stage mix|mux|all`、`--bootstrap [--force]`、`--json`；
+  不通过时退出码 1，并给出「哪个输入变了 / 该补跑哪一步」。
+
+**阻断（重点）**
+- `cf_pipeline` 渲染前强制过门禁（`mix` 要求画面+配音最新，`mux` 要求混音最新），
+  不通过直接退出 4；新增 `--allow-stale` 显式放行。
+- `qc_loop` 同样在 r6/r7 前阻断，避免「改了句 12 却带着句 7 的旧音频混」。
+- 工程侧 `r6_mix.py` / `r7_mux.py` 增加 `--check-only` / `--allow-stale` 与自动前检；
+  `cut.py` / `elastic_fit.py` 产出后登记基线。手工跑脚本也挡得住。
+- 新增 `common.preflight()/stamp()`（工程侧，按需加载仓库实现，找不到时降级为提示）。
+- 门禁基线已在 EP01 建立（`guard --bootstrap --force`），四阶段全 OK；
+  实测临时改一句旁白后：`r6 --check-only` 与 `r7 --check-only` 均退出 4，
+  还原后恢复 OK。
+
+**同步**
+- skill 配方 `anime-recap/scripts/{common,cut,r6_mix,r7_mux}.py` 更新为带门禁版本
+  （r7 阈值同时由旧标定 1350–1900/130–190/8–13/LRA≤5 换为现行 900–1900/40–190/8–20/LRA≤8）。
+
+**验证**
+- 新增 `tests/test_freshness.py` 14 项；全套 196 项全绿（跳过 1）。
+
+---
+
 ## v0.9.0 · 2026-11-12 — 冗余清理（clean）：旧版成片 / 备份 / 过期帧 / 可再生中间物
 
 **新增**

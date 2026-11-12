@@ -39,6 +39,33 @@ def run(cmd: list[str], cwd: Path | None = None) -> bool:
     return subprocess.run([str(c) for c in cmd], cwd=str(cwd) if cwd else None).returncode == 0
 
 
+def _stamp(proj_dir, stage: str) -> None:
+    try:
+        from aicutplan import freshness as FR
+        FR.stamp(proj_dir, stage)
+    except Exception as e:
+        print(f"[渲染门禁] 基线写入失败（{stage}）：{type(e).__name__} {e}", flush=True)
+
+
+def _gate(proj_dir, stage: str, allow_stale: bool) -> bool:
+    """局部重跑同样要过门禁：改了句 12 不能带着句 7 的旧音频混。"""
+    try:
+        from aicutplan import freshness as FR
+    except Exception:
+        return True
+    ok, issues = FR.render_ready(proj_dir, stage)
+    if ok:
+        return True
+    print(f"[渲染门禁] {stage} 前置未通过：", flush=True)
+    for x in issues:
+        print("  ! " + x, flush=True)
+    if allow_stale:
+        print("[渲染门禁] --allow-stale：继续渲染", flush=True)
+        return True
+    print("[渲染门禁] 已阻断（补跑上面的阶段，或 --allow-stale 强行继续）", flush=True)
+    return False
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--project", required=True)
@@ -51,6 +78,8 @@ def main() -> int:
     ap.add_argument("--tts-python", default=TTS_PY, help="TTS 解释器（需 edge_tts）")
     ap.add_argument("--no-snapshot", action="store_true", help="闭环完成后不归档到 runs/")
     ap.add_argument("--label", default="", help="本次归档标签（默认 qc-时间）")
+    ap.add_argument("--allow-stale", action="store_true",
+                    help="渲染门禁不通过也继续（成片会混入旧素材，不推荐）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -106,9 +135,20 @@ def main() -> int:
         return 0
     t_start = time.time() - 2
     for k, (cmd, cwd) in enumerate(steps):
+        # 渲染前门禁：r6 要求画面/配音为当前输入生成；r7 要求混音为当前输入生成
+        if k == 3 and not _gate(proj_dir, "mix", a.allow_stale):
+            return 4
+        if k == 4 and not _gate(proj_dir, "mux", a.allow_stale):
+            return 4
         if not run(cmd, cwd):
             print(f"[闭环] 中断于: {cmd[1]}")
             return 2
+        if k == 2:
+            _stamp(proj_dir, "tts")
+        elif k == 3:
+            _stamp(proj_dir, "mix")
+        elif k == 4:
+            _stamp(proj_dir, "mux")
         if k == 1:  # r5 之后立刻校验音频真的换了，防止「文本新词 / 成片旧音频」
             stale = []
             for i in changed:

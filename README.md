@@ -138,10 +138,25 @@ python -m aicutplan runs verify --project <pj>   # 校验该 run 全部产物
 
 1. 成片只认 `latest.json` 指向的 run —— `runs latest` 会校验成片指纹，被替换/缺失
    直接报错，**不静默回退**；
-2. 每次 `run` 开始打印「污染检查」：归档后未归档的改动、与 tts-result 指纹不符的
-   旧音频、早于成片的旧质检帧（只告警不阻断）；
+2. 渲染前**硬门禁**：`cf_pipeline` / `qc_loop` / 工程侧 r6·r7 会校验「画面/配音/混音
+   是否由当前输入生成」，不通过直接阻断（退出码 4），不再只是告警；
 3. TTS 音频带内容指纹（`mp3_sig`），r5 合成时写入，扫描按指纹核对而不是 mtime；
 4. 多集并行：不同集是独立目录，各自 `cf_pipeline` 互不干扰；同集同时只跑一个渲染。
+
+**渲染门禁**（内容指纹基线，见 `aicutplan/freshness.py`）：
+
+```bash
+python -m aicutplan guard --project <pj>            # 四阶段总览 + mix/mux 能否放行
+python -m aicutplan guard --project <pj> --stage mix
+python -m aicutplan guard --project <pj> --bootstrap # 给已有工程建基线（先确认产物可用）
+python -m aicutplan guard --project <pj> --json
+# 工程侧脚本也可单独自检：
+python <pj>/r6_mix.py --project <pj> --check-only    # 0=可渲染 / 4=应阻断
+```
+
+判定口径：每步产出后把「它读到的输入」的指纹（大文件首尾 4MB + 大小，小文件全量）
+记进 `json/render_state.json`。改了旁白、窗口、音色或任一 mp3，对应上游立即变
+`stale`，并给出「该补跑哪一步」；确要强行出片用 `--allow-stale`，日志会标注。
 
 **清理冗余**（旧版成片 / 备份 / 过期质检帧 / 可再生中间物）：
 

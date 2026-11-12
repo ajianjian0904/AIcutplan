@@ -43,9 +43,9 @@
 """
 from __future__ import annotations
 
-__version__ = "0.9.0"
+__version__ = "0.9.1"
 __all__ = [
     "__version__",
     "paths", "io", "media", "cache", "contracts",
-    "subtitles", "planning", "evidence", "config", "workspace", "clean", "cli",
+    "subtitles", "planning", "evidence", "config", "workspace", "clean", "freshness", "cli",
 ]
