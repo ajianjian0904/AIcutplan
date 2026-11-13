@@ -309,6 +309,24 @@ python _batch/run.py EP02 EP03
 `_batch/alignment_EP0X.md` 保留；旧的 `_batch/{build,director,rebuild}.py`
 已标 DEPRECATED，仅作事故追溯，不再维护。
 
+### 配方标定模式（v0.10.0，默认）
+
+`run.py` 现在默认用 `director_v3_EP0X.json` —— 严格按「平时动漫」四集实测配方：
+11 字一句、1.32s 一刀、六段式叙事、主角不报名、6 段短插 + 唯一 30s 大鱼原声、
+YunxiNeural `+26%`、烧单行中文 + 原声日文双轨字幕、响度 −13.2 / LRA ≤4.5。
+
+```bash
+python _batch/make_v3.py                 # 从 v3_data.py 重生成三集稿
+python _batch/run.py EP02 EP03 EP04      # 按配方出片（默认 v3）
+python _batch/run.py EP02 --v2           # 回退到旧版 v2 稿
+```
+
+`r7_mux` 验收分成两段：**配方不变量**逐条打 ✓/✗；**契约限制项**
+（切点密度 / 单镜中位 / 镜:句 / 字/刀 / 段数）只打印实际值与配方目标。
+原因是「一句跨多刀」会违反 `t0 == wins[ws].new_start` 的音画契约并留下句间空隙，
+本实现选择保留契约，不用放宽阈值伪装达标。
+
+
 **已固化为强制契约（v0.9.5）**：`sents.json` 每句必须带
 `src: [源片起, 源片止]`，`narrate --sentences` 会在**落盘前**拿它与绑定窗口的
 `src_start/src_end` 逐一比对，不符直接退出码 5、不写任何产物；同时校验

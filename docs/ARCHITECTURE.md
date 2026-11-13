@@ -108,7 +108,7 @@ AIcutplan/
 │   │   └── qc_visual.py           ⑥会话内逐句质检 plan/merge/probe
 │   │
 │   ├── batch/                     L1 会话内导演批量出片唯一入口（v0.9.6）
-│   │   ├── planner.py             导演稿(JSON) → cutplan/meta/story_plan/sents(带 src)
+│   │   ├── planner.py             导演稿(JSON) → cutplan/meta/story_plan/sents(带 src)；配方标定 v3
 │   │   └── pipeline.py           plan→cut→narrate→tts→fit→mix→mux→snapshot
 │   │                            + 断点续跑前置完整性校验 / --dry-run
 │   │

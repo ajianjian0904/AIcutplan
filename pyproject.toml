@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aicutplan"
-version = "0.9.6"
+version = "0.10.0"
 description = "动漫速讲（漫剪）自动剪辑与逐句校对流水线：cut-first 画面先定 + 会话内导演 + 生成后质检闭环"
 readme = "README.md"
 requires-python = ">=3.10"
