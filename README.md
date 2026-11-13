@@ -313,7 +313,7 @@ python _batch/run.py EP02 EP03
 
 `run.py` 现在默认用 `director_v3_EP0X.json` —— 严格按「平时动漫」四集实测配方：
 11 字一句、1.32s 一刀、六段式叙事、主角不报名、6 段短插 + 唯一 30s 大鱼原声、
-YunxiNeural `+26%`、烧单行中文 + 原声日文双轨字幕、响度 −13.2 / LRA ≤4.5。
+YunxiNeural `+26%`、全中文字幕（原声段烧会话内中文翻译，日文仅回退）、响度 −13.2 / LRA ≤4.5。
 
 ```bash
 python _batch/make_v3.py                 # 从 v3_data.py 重生成三集稿
