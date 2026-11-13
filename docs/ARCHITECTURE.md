@@ -107,6 +107,11 @@ AIcutplan/
 │   │   ├── elastic_fit.py         ⑤TTS 音频弹性适配已定槽位
 │   │   └── qc_visual.py           ⑥会话内逐句质检 plan/merge/probe
 │   │
+│   ├── batch/                     L1 会话内导演批量出片唯一入口（v0.9.6）
+│   │   ├── planner.py             导演稿(JSON) → cutplan/meta/story_plan/sents(带 src)
+│   │   └── pipeline.py           plan→cut→narrate→tts→fit→mix→mux→snapshot
+│   │                            + 断点续跑前置完整性校验 / --dry-run
+│   │
 │   ├── session/                   L1 会话内工具（读图批次，产出被主链消费）
 │   │   ├── shot_desc.py           镜头证据包生成器（数据契约）
 │   │   ├── session_desc.py        会话内读图批次 plan/merge

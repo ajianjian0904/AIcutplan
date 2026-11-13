@@ -192,16 +192,44 @@ def _next_run_id(runs_dir: Path, label: str = "") -> str:
     return f"r{seq + 1:03d}_{ts}" + (f"_{lab}" if lab else "")
 
 
+def qc_status(root: Path) -> dict:
+    """会话内质检状态（只读）：``verified`` / ``partial`` / ``unverified``。
+
+    ``json/qc_visual.json`` 由 ``qc --merge`` 产出，每行带 ``judged`` 标记。
+    注意：没有质检判定不等于成片有问题，只是「未被逐格验证」，因此默认
+    只记录不阻断；prod 可用 ``require_qc=True`` 强制。
+    """
+    p = root / "json" / "qc_visual.json"
+    if not p.exists():
+        return {"state": "unverified", "judged": 0, "total": 0,
+                "mismatch": 0, "reason": "缺 json/qc_visual.json（未跑 qc --merge）"}
+    rows = load_json(p, default=[]) or []
+    judged = sum(1 for r in rows if isinstance(r, dict) and r.get("judged"))
+    total = len(rows)
+    state = ("verified" if total and judged == total else
+             "partial" if judged else "unverified")
+    return {"state": state, "judged": judged, "total": total,
+            "mismatch": sum(1 for r in rows if isinstance(r, dict) and r.get("match") == 0),
+            "reason": "" if state == "verified" else f"{judged}/{total} 句已判定"}
+
+
 def snapshot(project: str | Path, *, label: str = "", sentences: str | Path | None = None,
-             note: str = "") -> dict:
+             note: str = "", require_qc: bool = False) -> dict:
     """把当前工程的成片与关键 JSON 归档为一次不可变 run，并更新 latest。
 
     调用前应确保已跑完 r7（成片存在）。返回 manifest 字典。
+    ``require_qc=True`` 时，未跑完会话内逐格质检会直接抛错（不产生空 run）。
     """
     root = project_dir(project)
     final_src = root / "out" / "03-rapid-narration.mp4"
     if not final_src.exists():
         raise FileNotFoundError(f"{final_src} 不存在：先跑完渲染（r7_mux）再归档")
+
+    qc = qc_status(root)
+    if require_qc and qc["state"] != "verified":
+        raise RuntimeError(
+            f"质检未完成（{qc['state']}：{qc['reason']}）："
+            "先跑 qc --plan → 会话内逐格判定 → qc --merge，或去掉 --require-qc")
 
     runs_dir = root / RUNS_DIR
     run_id = _next_run_id(runs_dir, label)
@@ -261,6 +289,7 @@ def snapshot(project: str | Path, *, label: str = "", sentences: str | Path | No
         "episode": (loc or {}).get("episode"),
         "source_video": cfg.get("source_video"),
         "sentences": sent_info,
+        "qc": qc,
         "artifacts": artifacts,
     }
     dump_json(run_dir / "manifest.json", manifest)
@@ -275,6 +304,7 @@ def snapshot(project: str | Path, *, label: str = "", sentences: str | Path | No
         "final": f"{RUNS_DIR}/{run_id}/final.mp4",
         "final_sig": final.get("sig"),
         "final_bytes": final.get("bytes"),
+        "qc": qc.get("state"),
         "project": str(root),
     }
     dump_json(runs_dir / LATEST_FILE, latest)

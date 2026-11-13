@@ -5,6 +5,37 @@
 
 ---
 
+## v0.9.6 · 2026-11-13 — P1/P2 收口：唯一入口、逻辑入仓、CI、质检可审计
+
+上一版补了语义契约，但「旁路脚本仍可存在、断点续跑仍能跳过数据落地」的根因没除。
+本版把生产路径收进治理边界：
+
+- **唯一入口** `python -m aicutplan batch`：新增 `aicutplan/batch/`
+  （`planner.py` 导演稿→窗口表 / `pipeline.py` 链路编排），作品库 `_batch/` 只留
+  **数据** `director_EP02/03/04.json` 与薄封装 `run.py`；旧 `build/director/rebuild.py`
+  标 DEPRECATED。数据与逻辑分离，编排不再游离于版本控制之外。
+- **断点续跑前置完整性校验**（`pipeline.preflight_resume`）：缺产物、
+  `hook_clip` 未定义、`sents.json` 不过语义契约一律退出 6。直接堵死 EP03 事故
+  （`--from-step plan` 跳过写 hook_clip 的 story 步骤，钩子退化成空镜却无报错）。
+  `plan` 步骤后还有一道自防御：planner 自己生成的稿必须过契约。
+- **迁移无损验证**：三份导演稿从 `D` 常量导出后，仓库版 planner 在临时工程生成
+  172/157/161 窗、81/72/75 句、1343/1140/1203 字，与现有三集**逐项一致**，契约 0 错。
+- **P2 质检可审计**：`workspace.qc_status()` 判定 `verified/partial/unverified`，
+  `snapshot()` 写进 manifest 与 latest；`runs snapshot --require-qc` /
+  `AICUTPLAN_REQUIRE_QC=1` 强制「未逐格质检不许归档」，默认只记录不阻断
+  （dev 宽松 / prod 强制，不卡死历史归档）。
+- **CI 与打包**：新增 `.github/workflows/tests.yml`（Py 3.10/3.12，`pip install -e .`
+  + 全量 unittest + compileall）；`pyproject.toml` 的包发现从只有顶层
+  `aicutplan` 改为 `find include = ["aicutplan*"]`，`aicutplan.batch` 等子包才真正进包。
+- 新增 `tests/test_batch.py` 16 项：planner→契约串联、导演稿结构校验、
+  断点前置（缺 hook_clip / 产物 / sents / 均匀稿）、CLI dry-run 与退出码 6、
+  qc 状态与 require_qc 归档。全套 **239 项全绿**（skip 1）。
+
+> 运行位置提示：`python -m aicutplan batch` 需在仓库根执行，或先
+> `pip install -e .`；作品库侧请用 `python _batch/run.py EP02`（已处理 cwd）。
+
+---
+
 ## v0.9.5 · 2026-11-13 — 会话内导演契约：把「旁白对着画面写」变成可执行断言
 
 复盘结论（见上一节补记）：事故能一路绿灯，是因为 `sents.json = {ws,we,text}` 只约束结构，

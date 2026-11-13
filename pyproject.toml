@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aicutplan"
-version = "0.9.5"
+version = "0.9.6"
 description = "动漫速讲（漫剪）自动剪辑与逐句校对流水线：cut-first 画面先定 + 会话内导演 + 生成后质检闭环"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -41,9 +41,10 @@ aicutplan = "aicutplan.cli:main"
 [project.urls]
 Repository = "https://github.com/ajianjian0904/AIcutplan"
 
-[tool.setuptools]
-# 阶段脚本保持在根目录（见 docs/ARCHITECTURE.md「设计约束」），只把 L0 基础层打包
-packages = ["aicutplan"]
+[tool.setuptools.packages.find]
+# 包含 aicutplan 及其全部子包（shared / chain / session / legacy / webui / batch）；
+# 阶段脚本仍以源码方式调用，不参与打包。
+include = ["aicutplan*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

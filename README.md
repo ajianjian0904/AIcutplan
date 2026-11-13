@@ -283,8 +283,31 @@ $PY -m aicutplan run --project $PJ --qc-apply <改好的句子稿>
 5. 自检：`narrate --sentences` 覆盖必须是 `N/N`、`qc_report` 超槽 0、非钩子窗口
    `src_start` 不逆序。
 
-参考实现在作品库 `_batch/`：`director.py`（会话内稿 + 编排）、`rebuild.py`（重出链）、
-`director_EP0X.md`（导演表）、`alignment_EP0X.md`（逐句音画对照表）。
+**唯一入口（v0.9.6）**：编排与渲染逻辑已收进仓库 `aicutplan/batch/`
+（`planner.py` 导演稿→窗口表，`pipeline.py` 链路），受版本控制、单测与 CI 覆盖。
+导演稿是**数据**：`_batch/director_EP0X.json`；作品库侧只留 `run.py` 薄封装。
+
+```bash
+# 在仓库根运行（或先 pip install -e .）
+python -m aicutplan batch --project <pj>/project.json --script _batch/director_EP02.json
+python -m aicutplan batch --project <pj>/project.json --from-step narrate  # 断点续跑
+python -m aicutplan batch --project <pj>/project.json --dry-run            # 只打印命令
+# 作品库侧等价入口（自动处理运行目录）
+python _batch/run.py EP02 EP03
+```
+
+断点续跑会先做**前置完整性校验**：缺产物、`hook_clip` 未定义、句子稿契约不过
+一律退出 6——v1 事故里 EP03 用 `--from-step plan` 跳过写 `hook_clip` 的步骤，
+钩子退化成空镜却无人报错，这个洞已堵死。TTS 解释器可用
+`AICUTPLAN_TTS_PY` 指定（装了 edge-tts 的那个）。
+
+归档会记录质检状态 `qc.state`（`verified` / `partial` / `unverified`）；
+`--require-qc` 或 `AICUTPLAN_REQUIRE_QC=1` 可强制「未逐格质检不许归档」。
+默认只记录不阻断，避免把未跑 qc 的历史归档卡死（dev 宽松 / prod 强制）。
+
+逐集可核对的导演表 `_batch/director_EP0X.md` 与音画对照表
+`_batch/alignment_EP0X.md` 保留；旧的 `_batch/{build,director,rebuild}.py`
+已标 DEPRECATED，仅作事故追溯，不再维护。
 
 **已固化为强制契约（v0.9.5）**：`sents.json` 每句必须带
 `src: [源片起, 源片止]`，`narrate --sentences` 会在**落盘前**拿它与绑定窗口的

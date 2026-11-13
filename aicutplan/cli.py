@@ -40,7 +40,7 @@ SCRIPTS = {
 }
 
 # 这些子命令由本包直接实现，不启子进程
-DIRECT = ("check", "lint", "version", "lib", "runs", "clean", "guard")
+DIRECT = ("check", "lint", "version", "lib", "runs", "clean", "guard", "batch")
 
 
 def _library(argv: list[str]) -> int:
@@ -108,6 +108,12 @@ def _library(argv: list[str]) -> int:
     return 0
 
 
+def _batch(argv: list[str]) -> int:
+    """会话内导演批量出片唯一入口（实现见 aicutplan.batch.pipeline）。"""
+    from .batch.pipeline import main as batch_main
+    return batch_main(argv)
+
+
 def _runs(argv: list[str]) -> int:
     """生成版本：列表 / 归档 / 最新指针 / 校验。"""
     from . import workspace as WS
@@ -124,14 +130,21 @@ def _runs(argv: list[str]) -> int:
     p.add_argument("--label", default="", help="版本标签，如 v36")
     p.add_argument("--sentences", default=None, help="本次使用的句子稿")
     p.add_argument("--note", default="")
+    p.add_argument("--require-qc", action="store_true",
+                   help="要求已跑完会话内逐格质检（qc --merge），否则拒绝归档")
     a = ap.parse_args(argv)
 
     if a.sub == "snapshot":
-        m = WS.snapshot(a.project, label=a.label, sentences=a.sentences, note=a.note)
+        try:
+            m = WS.snapshot(a.project, label=a.label, sentences=a.sentences,
+                            note=a.note, require_qc=a.require_qc)
+        except (RuntimeError, FileNotFoundError) as e:
+            print(f"[runs] 归档被拒绝：{e}", file=sys.stderr)
+            return 6
         run_dir = WS.project_dir(a.project) / WS.RUNS_DIR / m["run_id"]
         print(f"[runs] 已归档 {m['run_id']} → {run_dir}")
         print(f"       成片 {m['artifacts'].get('final.mp4', {}).get('bytes', 0) / 1048576:.1f}MB"
-              f"  产物 {len(m['artifacts'])} 个")
+              f"  产物 {len(m['artifacts'])} 个  质检 {m['qc']['state']}")
         return 0
     if a.sub == "latest":
         d = WS.latest(a.project, verify=True)
@@ -395,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
         return _clean(a.rest)
     if a.command == "guard":
         return _guard(a.rest)
+    if a.command == "batch":
+        return _batch(a.rest)
     if a.command in ("check", "lint"):
         # 从透传参数里取 --project
         project = None
