@@ -8,14 +8,20 @@
 直接由窗口时长推出（时长条件生成）。旁白写完 TTS 后时长天然落在画面窗口内，
 只需 ±15% 弹性微调（elastic_fit.py / r6 内置），不再裁画面。
 
-同步不再靠事后对齐，而是靠生成顺序保证——"对不上"在构造上不可能发生。
+同步不再靠事后对齐，而是靠生成顺序保证——但这句话**只对 LLM 分支成立**。
+会话内 ``--sentences`` 分支的稿子来自工程外部，生成顺序无法保证，必须由
+:func:`aicutplan.contracts.check_sentences_contract` 在落盘前逐句校验
+``src``（该句对应的源片区间）与绑定窗口一致。历史上正是这个分支被
+「按窗口序号均匀分配旁白」绕过，产出了三集音画全错位的废片。
 
 用法：python narrate_cut.py --project <pj> [--rate 4.95]
+      python narrate_cut.py --project <pj> --sentences sents.json
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -25,6 +31,7 @@ sys.path.insert(0, str(ROOT))
 from aicutplan.shared import narration as NR  # noqa: E402
 from aicutplan.shared import story_parse as SP  # noqa: E402
 from aicutplan.shared.smart_align import _load  # noqa: E402
+from aicutplan.contracts import NarrationContractError  # noqa: E402
 
 NARR_SYS = ("你是动漫解说文案写手。画面剪辑已经完成（输出时间轴已定型），你要对着这个时间轴"
             "逐窗口写解说词：每句覆盖指定的连续窗口，字数必须落在该窗口时长的预算内。")
@@ -178,7 +185,8 @@ def export_table(proj_dir: Path, rate: float) -> Path:
     return path
 
 
-def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> dict:
+def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None,
+            *, legacy_sents: bool = False) -> dict:
     d = proj_dir / "json"
     plan = _load(d / "cutplan.json")
     meta = _load(d / "cutplan_meta.json")
@@ -194,10 +202,26 @@ def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> d
     for wi, m in enumerate(wmeta):
         beat_wins.setdefault(m["beat"], []).append(wi)
 
-    # 会话内写作模式：句子已备好，只做校验与落盘
+    # 会话内写作模式：句子已备好，先过语义契约，再只做校验与落盘
     if sentences_path:
+        from aicutplan import contracts as CT
         raw = _load(Path(sentences_path))
-        sents_all = raw if isinstance(raw, list) else raw.get("sents", [])
+        sents_all = raw if isinstance(raw, list) else (raw.get("sents")
+                                                       or raw.get("sentences") or [])
+        cfg = _load(proj_dir / "project.json") if (proj_dir / "project.json").exists() else {}
+        # 必须在 _write_outputs 之前：废稿一旦落盘，后续门禁只会证明「废稿是最新的」
+        errs, warns, cstats = CT.check_sentences_contract(
+            sents_all, wins, cfg, legacy=legacy_sents)
+        for w in warns:
+            print(f"[契约] 提示：{w}", flush=True)
+        if errs:
+            for e in errs:
+                print(f"[契约] ✗ {e}", file=sys.stderr, flush=True)
+            raise NarrationContractError(
+                f"旁白稿未通过会话内导演契约（{len(errs)} 项），已阻断落盘")
+        print(f"[契约] 通过：{cstats['contract']} / src 校验 {cstats['src_checked']} 句 / "
+              f"钩子文案 {cstats['hook_sents']} 句 / 窗口回跳 {cstats['inversions']}（信息项）",
+              flush=True)
         items, binding = [], {}
         covered: set[int] = set()
         for s in sents_all:
@@ -222,8 +246,9 @@ def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> d
                and not (wins[wi].get("tier") == "hold_hl" or wins[wi].get("ost_mode") == "original")]
         if unc:
             print(f"[旁白后写·会话版] 未覆盖窗口 {unc}", flush=True)
-        _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all)
-        return {"sents": len(items), "covered": f"{n_cov}/{n_all}"}
+        _write_outputs(d, items, binding, beat_span, beat_wins, n_cov, n_all, cstats)
+        return {"sents": len(items), "covered": f"{n_cov}/{n_all}",
+                "contract": cstats["contract"]}
 
     items: list[dict] = []
     binding: dict[int, list[int]] = {}
@@ -313,15 +338,19 @@ def narrate(proj_dir: Path, rate: float, sentences_path: str | None = None) -> d
 
 
 def _write_outputs(d: Path, items: list[dict], binding: dict[int, list[int]],
-                   beat_span: dict, beat_wins: dict, n_cov: int, n_all: int) -> None:
+                   beat_span: dict, beat_wins: dict, n_cov: int, n_all: int,
+                   contract_stats: dict | None = None) -> None:
     """写 narration.json（含 r7 需要的 stats）+ align.json（含 sent_win_idx）。"""
     import statistics as _st
     lens = [len(it["text"]) for it in items]
-    narr_out = {"items": items,
-                "stats": {"speech_sec": round(sum(it["dur"] for it in items), 2),
-                          "chars": sum(lens),
-                          "sentences": len(items),
-                          "len_median": int(_st.median(lens)) if lens else 0}}
+    stats = {"speech_sec": round(sum(it["dur"] for it in items), 2),
+             "chars": sum(lens),
+             "sentences": len(items),
+             "len_median": int(_st.median(lens)) if lens else 0}
+    # legacy 稿（无 src）显式标记，供 check / snapshot / 后续审计识别
+    if contract_stats:
+        stats["contract"] = contract_stats.get("contract")
+    narr_out = {"items": items, "stats": stats}
     (d / "narration.json").write_text(json.dumps(narr_out, ensure_ascii=False, indent=1),
                                       encoding="utf-8")
     sent_span = [[it["i"], it["t0"], round(it["t0"] + it["dur"], 3), it["dur"]] for it in items]
@@ -349,7 +378,10 @@ def main() -> int:
     ap.add_argument("--project", required=True)
     ap.add_argument("--rate", type=float, default=4.95, help="TTS 语速标定 字/秒")
     ap.add_argument("--sentences", default=None,
-                    help="会话内已写好的句子 JSON 路径（[{'ws','we','text'}...]），跳过 LLM 写作")
+                    help="会话内已写好的句子 JSON 路径（[{'ws','we','text','src'}...]），跳过 LLM 写作")
+    ap.add_argument("--legacy-sents", action="store_true",
+                    help="显式豁免历史稿（缺 src 字段）；narration.stats 会打 legacy 标记。"
+                         "环境变量 AICUTPLAN_LEGACY_SENTS=1 等价")
     ap.add_argument("--export", action="store_true",
                     help="只导出会话内导演写作输入表（window_table.md），不写作")
     a = ap.parse_args()
@@ -359,7 +391,12 @@ def main() -> int:
     if a.export:
         export_table(proj_dir, a.rate)
         return 0
-    r = narrate(proj_dir, a.rate, sentences_path=a.sentences)
+    legacy = a.legacy_sents or os.environ.get("AICUTPLAN_LEGACY_SENTS") == "1"
+    try:
+        r = narrate(proj_dir, a.rate, sentences_path=a.sentences, legacy_sents=legacy)
+    except NarrationContractError as e:
+        print(f"[旁白后写] 已阻断：{e}", file=sys.stderr)
+        return 5
     print(f"[旁白后写] 完成 {r['sents']} 句，覆盖 {r['covered']} → narration.json + align.json")
     print("下一步：r5_tts.py → elastic_fit.py → r6_mix.py → r7_mux.py")
     return 0

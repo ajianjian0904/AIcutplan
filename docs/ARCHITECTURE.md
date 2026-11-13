@@ -79,6 +79,7 @@ AIcutplan/
 │   ├── media.py                   ffmpeg_bin / probe_json / probe_duration / extract_frame
 │   ├── cache.py                   content_sig / source_sig / is_stale / sig_valid / cache_valid
 │   ├── contracts.py               窗口·句子·证据包 schema + lint_narration / check_alignment
+│   │                             + 会话内导演契约（src 绑定 / 钩子断言，落盘前阻断）
 │   ├── subtitles.py               probe_subs / clean_text / parse_srt / merge_same_time / sniff_lang
 │   ├── planning.py                hook_score / pick_hook_clip / weight / reason / is_continuous
 │   ├── evidence.py                load_shots / score_shot / format_shot_line / compact
@@ -164,7 +165,7 @@ AIcutplan/
 | `io` | `load_json` / `dump_json` / `write_text_atomic` / `backup_copy` / `backup_rename` | subs_extract、evidence_feed、cache、tests |
 | `media` | `ffmpeg_bin` / `probe_json` / `probe_duration` / `extract_frame` | qc_visual、subs_extract、tests |
 | `cache` | `content_sig` / `file_sig` / `source_sig` / `project_key` / `is_stale` / `sig_valid` | subs_extract `--check`、cli `check`、tests |
-| `contracts` | `validate_windows` / `check_alignment` / `check_tts_consistency` / `lint_narration` / `summarize_quality` | cf_pipeline、cli `check`、tests |
+| `contracts` | `validate_windows` / `check_alignment` / `check_tts_consistency` / `lint_narration` / `summarize_quality` / **`check_sentences_contract`**（sents 源片区间绑定、钩子定义与专属文案、稿内顺序） | cf_pipeline、cli `check`、narrate `--sentences` 落盘前闸门、tests |
 | `subtitles` | `probe_subs` / `clean_text` / `parse_srt` / `merge_same_time` / `sniff_lang` / `norm` | subs_extract、asr_local、cf_pipeline、tests |
 | `planning` | `pick_hook_clip` / `hook_score` / `weight` / `reason` / `is_continuous` | cutfirst_plan、tests |
 | `evidence` | `load_shots` / `score_shot` / `format_shot_line` / `compact` | evidence_feed、tests |

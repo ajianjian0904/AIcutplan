@@ -5,6 +5,37 @@
 
 ---
 
+## v0.9.5 · 2026-11-13 — 会话内导演契约：把「旁白对着画面写」变成可执行断言
+
+复盘结论（见上一节补记）：事故能一路绿灯，是因为 `sents.json = {ws,we,text}` 只约束结构，
+所有闸门测的都是形式一致性。本版补上语义层：
+
+- **L0 `aicutplan/contracts.py`** 新增
+  `check_sentences_contract()` / `check_hook_contract()` / `hook_window_ids()`
+  与 `NarrationContractError`：
+  1. 每句必须声明 `src: [源片起, 源片止]`，落盘前与绑定窗口的 `src_start/src_end` 逐句比对
+     （容差 0.6/1.0s，容纳 cut.py 帧吸附）。「按序号均匀贴」当场失败；
+  2. 稿内正片 `src` 不得回跳（钩子是提前复用的后置爽点，跳过钩子块）；
+  3. 钩子断言：存在钩子窗时 `recap.hook_clip` 必须合法且与钩子窗源区间一致、
+     钩子段必须连续未裁切、钩子块必须有 ≥2 句专属文案；无钩子窗的旧链工程跳过；
+  4. 窗口源时间逆序**仅作信息项**——EP01 段内逆序 6 次却是 0 失配的合格成片，
+     不能把 V2 导演稿的「逆序 0」当成普适质量条件。
+- **落盘前闸门**：`narrate_cut.py --sentences` 在 `_write_outputs` 之前调用契约，
+  不通过退出码 5 且不写任何产物（废稿一旦落盘，后续门禁只会证明「废稿是最新的」）。
+  `narration.stats.contract` 写 `src-v2` / `legacy` 标记。
+  历史稿用 `--legacy-sents` 或 `AICUTPLAN_LEGACY_SENTS=1` 显式豁免并打标。
+- **主链接入**：`lint_narration` 追加钩子断言（cf_pipeline 默认阻断已自动生效）。
+- **兼容**：EP01 `my_sentences_v35.json` 无 `src`，重出时需显式 legacy；
+  EP02–04 已用 `_batch/backfill_src.py` 从吸附后 cutplan 回填（不重跑 director，
+  避免覆盖 cut.py 回写的窗口表）。`director.py` 今后生成稿直接写 `src`。
+- **负向回归** `tests/test_narration_contract.py` 19 项：均匀分配稿、缺/混用 src、
+  hook_clip 缺失/不符、钩子不连续、钩子无专属文案、稿内倒退必须失败；
+  legacy 豁免、旧链无钩子、EP01 式回跳必须放行；CLI 阻断发生在写文件之前。
+- 真实数据验证：v1 均匀稿（连伪造 src 也）报 7 项，首条「句0 声明源片 [2.0,16.0]，
+  绑定窗口却来自 [1144.0,1152.0]」；v2 三集稿全过；全套 **223 项测试全绿**（skip 1）。
+
+---
+
 ## 补记 · 2026-11-13 — 会话内导演规范（文档，代码未变）
 
 EP02–04 首版成片音画全错位：批量驱动把按剧情顺序写好的 54 句旁白**按窗口序号

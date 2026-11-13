@@ -258,6 +258,21 @@ def lint_narration(proj_dir: str | Path) -> list[str]:
     unc = uncovered_windows(wins, al.get("sent_win_idx") or {})
     if unc:
         bad.append(f"未覆盖窗口 {unc[:10]}{'...' if len(unc) > 10 else ''}")
+
+    # 会话内导演契约：钩子定义 + 专属文案（主链 lint 默认阻断）。
+    # 仅对存在钩子窗口的工程生效；窗口源时间逆序只作信息项，不进 bad。
+    try:
+        cfg = load_json(p.project, default={}) or {}
+        hid = hook_window_ids(wins)
+        n_hook = None
+        if hid:
+            lo, hi = hid[0], hid[-1]
+            n_hook = sum(1 for v in (al.get("sent_win_idx") or {}).values()
+                         if lo <= int(v[0]) <= hi)
+        he, _ = check_hook_contract(wins, cfg, hook_sent_count=n_hook)
+        bad.extend(he)
+    except Exception as exc:      # 契约层异常不能让 lint 静默放行
+        bad.append(f"导演契约校验异常：{type(exc).__name__} {exc}")
     return bad
 
 
@@ -267,3 +282,177 @@ def format_issues(issues: Iterable[str], *, title: str = "校验") -> str:
     if not rows:
         return f"[{title}] 全部通过"
     return f"[{title}] {len(rows)} 项问题：\n" + "\n".join(f"  - {r}" for r in rows)
+
+
+# =============================================================================
+# 会话内导演契约（2026-11-13 事故防线）
+# -----------------------------------------------------------------------------
+# 事故：批量驱动把「按剧情顺序写好的 N 句」按窗口序号均匀贴到 cutplan 窗口上。
+# 所有形式闸门（覆盖度 N/N、超槽 0、验收 10/12、渲染门禁）全绿，成片却整条
+# 音画错位 —— 因为旧契约 sents.json = {ws, we, text} 只约束结构，不约束语义。
+#
+# 修复：每句必须声明 ``src: [源片起, 源片止]``，落盘前与它绑定的窗口逐一比对。
+# 这条成立 ⇒ 句子讲的画面 == 它覆盖的窗口画面 ⇒ 画面顺序 == 写稿顺序，
+# 「均匀分配」会因为声明的源区间与窗口源区间对不上而当场失败。
+#
+# 兼容性：``--legacy-sents`` 显式豁免（历史稿无 src），并在 narration.stats
+# 打 ``contract: "legacy"`` 标记；逆序仅作信息项 —— EP01 段内逆序 6 次却是
+# 0 失配的合格成片（它逐窗对着画面写），故逆序不是质量的必要条件。
+# =============================================================================
+HOOK_MARK = "连续未裁切"
+SRC_TOL_A = 0.6   # 窗口起点容差（cut.py 帧吸附约 ±0.15s）
+SRC_TOL_B = 1.0   # 窗口终点容差（末窗可能被合并）
+
+
+class NarrationContractError(RuntimeError):
+    """旁白稿不满足会话内导演契约；必须在写 narration/align 之前阻断。"""
+
+
+def hook_window_ids(wins: list[dict]) -> list[int]:
+    """识别剪辑规划锁定的「源片连续未裁切爽点」钩子窗口。"""
+    return [i for i, w in enumerate(wins)
+            if HOOK_MARK in str(w.get("reason", ""))]
+
+
+def check_hook_contract(wins: list[dict], cfg: dict,
+                        hook_sent_count: int | None = None) -> tuple[list[str], list[str]]:
+    """钩子断言。返回 ``(errors, warnings)``。
+
+    仅在工程存在钩子窗口时生效：旧链工程（ep05 / recap-02 等）本来就没有
+    钩子结构，不能因为新增断言把它们判死。
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    ids = hook_window_ids(wins)
+    if not ids:
+        warnings.append("未识别到钩子窗口（旧链工程？），跳过钩子契约")
+        return errors, warnings
+
+    clip = (cfg.get("recap") or {}).get("hook_clip")
+    valid = (isinstance(clip, (list, tuple)) and len(clip) == 2
+             and all(isinstance(x, (int, float)) for x in clip)
+             and float(clip[1]) > float(clip[0]))
+    if not valid:
+        errors.append("recap.hook_clip 未定义或不合法：钩子窗口存在，"
+                      "但 project.json 没有锁定源片连续爽点段")
+    else:
+        a, z = float(clip[0]), float(clip[1])
+        wa = float(wins[ids[0]]["src_start"])
+        wz = float(wins[ids[-1]]["src_end"])
+        if abs(wa - a) > SRC_TOL_A or abs(wz - z) > SRC_TOL_B:
+            errors.append(f"hook_clip [{a:.2f},{z:.2f}] 与钩子窗口源区间 "
+                          f"[{wa:.2f},{wz:.2f}] 不符")
+        # 钩子必须是源片连续、未经裁切重排的一整段
+        gaps = [k for k in range(len(ids) - 1)
+                if abs(float(wins[ids[k + 1]]["src_start"])
+                       - float(wins[ids[k]]["src_end"])) > 0.2]
+        if gaps:
+            errors.append(f"钩子段不连续：{len(gaps)} 处窗口首尾断开（钩子必须是源片连续未裁切段）")
+
+    if hook_sent_count is not None and hook_sent_count < 2:
+        errors.append(f"钩子块只有 {hook_sent_count} 句专属文案（要求 ≥2）："
+                      "钩子是剪辑锁定的前置爽点，必须有自己的钩子文案，不能贴剧情开场白")
+    return errors, warnings
+
+
+def check_sentences_contract(sents: list[dict], wins: list[dict], cfg: dict | None = None,
+                             *, legacy: bool = False) -> tuple[list[str], list[str], dict]:
+    """**落盘前**校验会话内导演稿。返回 ``(errors, warnings, stats)``。
+
+    校验项：
+      1. 每句声明 ``src``（或整稿显式 legacy 豁免）；
+      2. ``src`` 与绑定窗口的源片区间一致 —— 拦住「均匀分配」；
+      3. 稿内源片区间不回跳 —— 导演稿声称按剧情顺序；
+      4. 钩子定义 + 钩子专属文案（复用 :func:`check_hook_contract`）；
+      5. 窗口源时间逆序仅作信息项，不阻断。
+
+    本函数无副作用、不写文件，便于单测直接用构造数据回归。
+    """
+    errors: list[str] = []
+    warnings: list[str] = []
+    sents = list(sents or [])
+    cfg = cfg or {}
+    stats = {"contract": "src-v2", "sentences": len(sents), "src_checked": 0,
+             "hook_sents": 0, "inversions": 0}
+    if not sents:
+        errors.append("旁白稿为空")
+        return errors, warnings, stats
+
+    with_src = [s for s in sents if s.get("src")]
+    if not with_src:
+        if legacy:
+            stats["contract"] = "legacy"
+            warnings.append("legacy 稿：全部句子缺 src，已显式豁免（历史工程兼容期）；"
+                            "本次不校验语义绑定，narration.stats 会打 legacy 标记")
+        else:
+            errors.append("旁白稿缺 src 字段：会话内导演稿每句必须声明它对应的源片区间 "
+                          "[a,b]；历史稿请加 --legacy-sents 显式豁免")
+    elif len(with_src) != len(sents):
+        errors.append(f"src 字段混用：{len(with_src)}/{len(sents)} 句带 src，禁止部分声明")
+    else:
+        mismatches = 0
+        for k, s in enumerate(sents):
+            try:
+                ws, we = int(s["ws"]), int(s["we"])
+            except (KeyError, TypeError, ValueError):
+                errors.append(f"句{k} 缺 ws/we 或不是整数")
+                continue
+            if not (0 <= ws <= we < len(wins)):
+                errors.append(f"句{k} 窗口越界 ws={ws} we={we}（共 {len(wins)} 窗）")
+                continue
+            try:
+                a, z = float(s["src"][0]), float(s["src"][1])
+            except (KeyError, IndexError, TypeError, ValueError):
+                errors.append(f"句{k} src 不是合法的 [a,b] 数值对")
+                continue
+            if z <= a:
+                errors.append(f"句{k} src 区间倒置 [{a:.1f},{z:.1f}]")
+                continue
+            wa, wz = float(wins[ws]["src_start"]), float(wins[we]["src_end"])
+            if abs(a - wa) > SRC_TOL_A or abs(z - wz) > SRC_TOL_B:
+                mismatches += 1
+                if mismatches <= 6:      # 均匀分配会全表报错，只列前 6 条
+                    errors.append(f"句{k} 声明源片 [{a:.1f},{z:.1f}]，绑定窗口却来自 "
+                                  f"[{wa:.1f},{wz:.1f}] —— 旁白与画面不是同一段")
+            else:
+                stats["src_checked"] += 1
+        if mismatches > 6:
+            errors.append(f"… 另有 {mismatches - 6} 句源片区间与窗口不符（典型症状：按序号均匀分配旁白）")
+
+    hid = hook_window_ids(wins)
+    if hid:
+        lo, hi = hid[0], hid[-1]
+        stats["hook_sents"] = sum(1 for s in sents
+                                  if lo <= int(s.get("ws", -1)) <= hi)
+    he, hw = check_hook_contract(wins, cfg,
+                                 hook_sent_count=stats["hook_sents"] if hid else None)
+    errors.extend(he)
+    warnings.extend(hw)
+
+    hid_set = set(hid)
+    body = [float(w["src_start"]) for i, w in enumerate(wins) if i not in hid_set]
+    stats["inversions"] = sum(1 for i in range(1, len(body))
+                              if body[i] < body[i - 1] - 0.01)
+    if stats["inversions"]:
+        warnings.append(f"非钩子窗口源时间回跳 {stats['inversions']} 次（信息项：EP01 亦有 5 次"
+                        "且 0 失配；src 契约已保证逐句绑定正确，故不阻断）")
+
+    # src 契约成立时追加自洽断言：导演稿声称按剧情顺序，稿内源区间不得倒退。
+    # 钩子是「提前复用」的后置爽点，源片时间天然晚于正片，必须跳过钩子块，
+    # 否则每集都会在句 3（正片开头）误报一次回跳。
+    if stats["contract"] == "src-v2" and stats["src_checked"] == len(sents):
+        prev = -1.0
+        hook_end = hid[-1] if hid else -1
+        for k, s in enumerate(sents):
+            if int(s.get("ws", -1)) <= hook_end:
+                continue
+            try:
+                a = float(s["src"][0])
+            except (KeyError, IndexError, TypeError, ValueError):
+                break
+            if a < prev - SRC_TOL_A:
+                errors.append(f"句{k} 声明的源片区间回跳（{a:.1f} < {prev:.1f}）："
+                              "导演稿声称按剧情顺序，正片稿内却倒退")
+                break
+            prev = a
+    return errors, warnings, stats

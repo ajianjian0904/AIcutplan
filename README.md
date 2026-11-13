@@ -286,6 +286,22 @@ $PY -m aicutplan run --project $PJ --qc-apply <改好的句子稿>
 参考实现在作品库 `_batch/`：`director.py`（会话内稿 + 编排）、`rebuild.py`（重出链）、
 `director_EP0X.md`（导演表）、`alignment_EP0X.md`（逐句音画对照表）。
 
+**已固化为强制契约（v0.9.5）**：`sents.json` 每句必须带
+`src: [源片起, 源片止]`，`narrate --sentences` 会在**落盘前**拿它与绑定窗口的
+`src_start/src_end` 逐一比对，不符直接退出码 5、不写任何产物；同时校验
+`recap.hook_clip`、钩子段连续性、钩子块 ≥2 句专属文案、正片稿内源区间不回跳。
+`narration.stats.contract` 会写 `src-v2`。
+
+```bash
+# 历史稿（无 src，如 EP01/my_sentences_v35.json）重出时显式豁免并打 legacy 标记
+$PY -m aicutplan narrate --project $PJ --sentences sents.json --legacy-sents
+# 或：AICUTPLAN_LEGACY_SENTS=1
+```
+
+注意：窗口源时间回跳只作**信息项**，不阻断——EP01 段内回跳 6 次仍是 0 失配的
+合格成片（它逐窗对着画面写）；真正拦的是「句子声明的画面 ≠ 它绑定的窗口」。
+回归测试见 `tests/test_narration_contract.py`（19 项，含 v1 均匀分配稿负向用例）。
+
 ---
 
 ## 内嵌字幕优先（跳过音转字）
