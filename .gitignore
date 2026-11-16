@@ -9,6 +9,12 @@ __pycache__/
 # 冗余清理的回收站（clean --apply 产生，可 restore 或 empty）
 .trash/
 
+# 工程内的抽帧/质检缓存（工程目录通常不在仓库内；万一在，也不入库）
+.qcframes/
+.numframes/
+.shotdesc/
+.scenedesc/
+
 # 会话状态：含本机工程绝对路径与未写回改动，不入库
 studio_state.json
 studio_state.json.*

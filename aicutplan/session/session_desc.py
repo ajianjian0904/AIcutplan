@@ -16,8 +16,33 @@ def _frames_dir(proj: Path) -> Path:
     for name in (".shotdesc", ".scenedesc"):
         d = proj / name
         if d.exists() and any(d.glob("*.jpg")):
+            _check_frames_manifest(proj, d)
             return d
     raise SystemExit("找不到抽帧目录（.shotdesc/.scenedesc），先跑 prepare/shot_desc 抽帧")
+
+
+def _check_frames_manifest(proj: Path, d: Path) -> None:
+    """帧目录属于另一版源片时拒绝执行，避免拿旧图描述新片。
+
+    清单由 shot_desc.probe_frames 写（``_frames.json``）。没有清单的老目录放宽放行，
+    只做提示性跳过；有清单且指纹不符则直接退出。
+    """
+    mf = d / "_frames.json"
+    if not mf.exists():
+        return
+    if str(Path(__file__).resolve().parents[2]) not in sys.path:
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+    try:
+        from aicutplan import cache as CL
+        from aicutplan.shared import story_parse as SP
+        current = CL.file_sig(SP.source_video(proj))
+        want = json.loads(mf.read_text(encoding="utf-8")).get("video_sig")
+    except Exception:
+        return
+    if want and want != current:
+        raise SystemExit(
+            f"帧目录 {d.name} 属于另一版源片（_frames.json 指纹不符）；"
+            "先重跑 python aicutplan/session/shot_desc.py --project <pj> 重抽帧")
 
 
 def build_plan(proj: Path, per_batch: int) -> None:

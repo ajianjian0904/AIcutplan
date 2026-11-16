@@ -68,6 +68,15 @@ def probe_frames(video: Path, shots: list[dict], tmp: Path) -> dict[tuple, bytes
                                check=False)
             if f.exists() and f.stat().st_size > 500:
                 out[(s["i"], tag)] = f.read_bytes()
+    # 抽帧清单：记源片指纹与宽高，供 session_desc 判断「这批帧属于哪一版源片」。
+    # 旧实现只按 shot_XXXX{M,F,L}.jpg 命名，换源片后仍会命中旧图。
+    try:
+        from aicutplan import cache as CL
+        (tmp / "_frames.json").write_text(
+            json.dumps({"video_sig": CL.file_sig(video), "width": 240, "ver": "shot-v2"},
+                       ensure_ascii=False, indent=1), encoding="utf-8")
+    except Exception:
+        pass
     return out
 
 

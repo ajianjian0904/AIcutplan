@@ -205,6 +205,65 @@ def zh_subtitles(proj_dir) -> list:
 # --------------------------------------------------------------------------
 # 抽帧
 # --------------------------------------------------------------------------
+#: 帧集合版本：抽帧口径（张数/宽度/选帧算法）改了必须 +1，旧帧自动重抽
+FRAMES_VER = "frames-v2"
+
+
+def frames_sig(proj_dir, a: float, b: float, n: int, width: int = 320) -> str:
+    """帧集合的输入指纹：源片内容 + 区间 + 张数 + 宽度 + 版本。
+
+    旧实现只看「文件存在且 >800 字节」，换源片后仍会拿旧图理解新片 ——
+    与本项目「文件存在 = 内容最新」的历史事故同一类。
+    """
+    from aicutplan import cache as CL
+    return CL.content_sig(FRAMES_VER, CL.file_sig(source_video(proj_dir)),
+                          f"{a:.3f}", f"{b:.3f}", int(n), int(width))
+
+
+def _shots_in(proj_dir, a: float, b: float) -> list:
+    """与区间相交的镜头（用 shotlist.csv；没有就返回空）。"""
+    return [s for s in shotlist(proj_dir) if s["b"] > a + 0.01 and s["a"] < b - 0.01]
+
+
+def _shot_weight(s: dict) -> float:
+    """选帧优先级：时长居中（0.8–3.5s）优先，过碎/过长降权，亮度作次要项。"""
+    dur = max(0.05, float(s["b"]) - float(s["a"]))
+    fit = 1.0 - abs(dur - 2.0) / 6.0
+    return fit + 0.02 * float(s.get("br") or 0.0)
+
+
+def seg_marks(proj_dir, seg: dict, n: int) -> list:
+    """取帧时刻：有镜头表就按镜头取，否则均匀撒。
+
+    均匀撒帧会漏掉短促动作（0.5s 的挥剑可能一张都没拍到）；按镜头取时
+    12 张图覆盖 12 个不同画面，图数与 token 成本都不变。
+    - 段内镜头数 ≤ n：一镜一帧（中点）
+    - 镜头数 > n：按时间切 n 桶，每桶取信息量最高的镜头中点（保时间覆盖）
+    """
+    a, b = float(seg["a"]), float(seg["b"])
+    shots = _shots_in(proj_dir, a, b)
+    if not shots:
+        span = max(1.0, b - a)
+        return [a + span * (k + 0.5) / n for k in range(n)]
+    if len(shots) <= n:
+        return [(s["a"] + s["b"]) / 2 for s in shots]
+    buckets: list[list] = [[] for _ in range(n)]
+    width = max(1e-6, b - a)
+    for s in shots:
+        k = int((((s["a"] + s["b"]) / 2 - a) / width) * n)
+        buckets[min(n - 1, max(0, k))].append(s)
+    marks = []
+    for k, group in enumerate(buckets):
+        if not group:
+            continue
+        center = a + (k + 0.5) * width / n
+        # 桶内选「信息量高 且 靠近桶中心」的镜头：既不丢时间覆盖，也不都被桶边缘吸走
+        best = max(group, key=lambda s: _shot_weight(s)
+                   - 0.25 * abs((s["a"] + s["b"]) / 2 - center) / (width / n))
+        marks.append((best["a"] + best["b"]) / 2)
+    return marks
+
+
 def grab(proj_dir, t: float, out: Path) -> bool:
     if out.exists() and out.stat().st_size > 800:
         return True
@@ -219,18 +278,38 @@ def grab(proj_dir, t: float, out: Path) -> bool:
 
 
 def seg_frames(proj_dir, seg: dict, n: int = 12) -> list:
+    """抽段内帧，带内容指纹缓存。
+
+    - 清单 ``frames/_segNN.json`` 记 ``frames_sig`` + 帧清单：源片/区间/张数任一变化即重抽；
+    - 帧名带指纹前缀（``s00_00042_a1b2c3.jpg``），新旧源片的帧永不混用；
+    - 取帧时刻由 :func:`seg_marks` 决定（镜头感知，非均匀）。
+    """
     d = workdir(proj_dir) / "frames"
     d.mkdir(parents=True, exist_ok=True)
-    a, b = seg["a"], seg["b"]
-    span = max(1.0, b - a)
+    a, b = float(seg["a"]), float(seg["b"])
     n = max(4, min(16, int(n)))
-    out = []
-    for k in range(n):
-        t = a + span * (k + 0.5) / n
-        f = d / f"s{seg['i']:02d}_{int(t):05d}.jpg"
+    want = frames_sig(proj_dir, a, b, n, 320)
+    mf = d / f"_seg{seg['i']:02d}.json"
+    cached = read_json(mf, {}) or {}
+    if cached.get("frames_sig") == want and cached.get("frames"):
+        out, ok = [], True
+        for t, name in cached["frames"]:
+            p = d / str(name)
+            if not (p.exists() and p.stat().st_size > 800):
+                ok = False
+                break
+            out.append((float(t), p))
+        if ok and out:
+            return out
+    tag = want[:6]
+    names = []
+    for t in seg_marks(proj_dir, seg, n):
+        f = d / f"s{seg['i']:02d}_{int(round(float(t) * 100)):07d}_{tag}.jpg"
         if grab(proj_dir, t, f):
-            out.append((round(t, 1), f))
-    return out
+            names.append([round(float(t), 1), f.name])
+    mf.write_text(json.dumps({"frames_sig": want, "frames": names},
+                             ensure_ascii=False, indent=1), encoding="utf-8")
+    return [(float(t), d / str(name)) for t, name in names]
 
 
 # --------------------------------------------------------------------------
