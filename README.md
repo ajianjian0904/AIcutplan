@@ -96,6 +96,14 @@ pyproject.toml requirements.txt .gitignore CHANGELOG.md
 
 ```bash
 python -m aicutplan check --project <pj>
+# 加 --number-frames：把「旁白里有数字、台词里找不到」的句子抽成 1280 宽帧（<工程>/.numframes/），
+# 供读图核对画面浮字；只告警不阻断，详见 aicutplan/shared/number_frames.py
+python -m aicutplan check --project <pj> --number-frames
+# 加 --ocr：用 rapidocr-onnxruntime（可选依赖）识别这些帧，回答「画面当时写了什么」，写 json/ocr_numbers.json
+# 加 --ocr-dense：对「三帧没读到数字」的句子按 1 帧/秒补抽后再识别（单句最多 12 张）
+# 注意：这些都是参考信息，不判对错 —— 剧情以台词为准，画面浮字多为过程数据（增量/剩余/倍率）
+python -m aicutplan check --project <pj> --ocr
+python -m aicutplan check --project <pj> --ocr --ocr-dense
 ```
 
 ---

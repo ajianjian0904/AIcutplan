@@ -268,6 +268,7 @@ AIcutplan/
 | 改了 cutplan 但画面是旧的 | 分段缓存只按组序号命名 | `cut.py` 用窗口指纹 `md5(offset\|span\|expr)` |
 | 换工程目录后译中缓存读不到 | 缓存键 = `md5(工程目录)` | `cache.project_key` 明确记录这一语义 |
 | 源片换了但台词源没更新 | 产物未记录输入版本 | `ja-segments.json` 顶层 `sig` + `cache.sig_valid` |
+| 换源片后仍拿旧帧理解新片 | 段抽帧只判「文件存在且 >800 字节」 | `frames/_segNN.json` 记 `frames_sig`（源片指纹 + 区间 + 张数 + 宽度），帧名带指纹前缀；`.shotdesc/_frames.json` 记源片指纹，`session_desc` 发现不符直接拒绝 |
 
 **规范**：
 
@@ -323,9 +324,12 @@ pytest
 
 1. **两条链写同一工程目录**（见 §2）：web 台块级平移在 cut-first 数据上语义不成立，
    只应用句级锚点审稿。
-2. **`story_parse.py` 段缓存 `seg_XX.json` 仍按文件存在判定**：P0-2 的证据回喂拼进
-   prompt 后，若缓存命中则新证据不会进模型，需 `--force` 或接入 `cache.sig_valid`。
-   这是当前剩下的最大「旧片段复用」风险点。
+2. **抽帧缓存（v0.10.2 已修）**：段内 12 帧原来只判「文件存在且 >800 字节」，换源片后会拿
+   旧图理解新片；现在 `frames/_segNN.json` 记 `frames_sig`（源片内容 + 区间 + 张数 + 宽度），
+   帧名带指纹前缀；`.shotdesc/_frames.json` 同法记录，`session_desc` 指纹不符即拒绝执行。
+   段解析缓存 `seg_XX.json` 早已按 `_seg_sig`（含台词/镜头/场景指纹）判定，不再是风险点。
+   取帧时刻同时改为**镜头感知**（`seg_marks`）：一镜一帧，镜多则按时间分桶取信息量最高者，
+   避免均匀撒帧漏掉短促动作。
 3. `shot_desc.py` / `scene_desc.py` / `session_desc.py` 脚本本身零代码引用，但产物
    `shots_desc.json` / `scene_desc.json` 是新链核心输入 —— **保留为数据契约生成器，
    不要当死代码删除**。
@@ -333,8 +337,15 @@ pytest
    拿它跑 v3 结构会误判 12 项失败；`ep01` / `ep05` / `recap-02` 的 `r6_mix.py`
    仍带已修复的采样率 bug。
 5. `main` 分支停在检索腿版 `4871650`，`cut-first` 是主线，尚未合回。
-6. 说话人分离、原声能量/语速特征、数字事实 OCR 交叉校验尚未实现
-   （「十三万点 → 一万三千点」靠人工发现）。
+6. 说话人分离、原声能量/语速特征尚未实现；数字事实已做三层：
+   ①`number_claims.py` 台词断言（只提醒）；
+   ②`check --number-frames` 抽 1280 宽帧到 `.numframes/` 供读图；
+   ③`check --ocr` 用 `rapidocr-onnxruntime`（**可选依赖**）识别画面浮字，
+   四态 `screen-match / screen-other / noisy / no-text`，写 `json/ocr_numbers.json`；
+   ④`check --ocr-dense` 对「三帧没读到数字」的句子按 1 帧/秒补抽（单句 ≤12 张，
+   独立清单 `_dense.json`）后再识别，只增加参考信息，不改变判定。
+   **判定原则：台词 > 画面。** 画面浮字是过程数据（增量/剩余/倍率），口径常与旁白不同，
+   所以画面数字只作参考、不判旁白对错；美术字拆字（`13U5`）只算「疑似」。
 7. `.workbuddy/run_chain.py` / `run_chain2.py` 是会话临时脚本（被 `.gitignore`
    排除、不入库），其中 `run_chain2.py` 仍引用已删除的 `auto_script.py`。
    它们不属于项目代码，**不要执行**；`.workbuddy/memory/` 是工作区记忆，勿删。

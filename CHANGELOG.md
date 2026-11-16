@@ -5,6 +5,51 @@
 
 ---
 
+## v0.10.2 · 2026-11-16 — 抽帧缓存加指纹 + 镜头感知取帧 + 数值断言
+
+**修 bug（旧片段复用）**
+
+- `story_parse.seg_frames`：段抽帧原来只判「文件存在且 >800 字节」，换源片后会拿旧图
+  理解新片。现在写 `frames/_segNN.json`（`frames_sig` = 源片指纹 + 区间 + 张数 + 宽度），
+  帧名带指纹前缀，指纹不符即重抽。
+- `shot_desc.probe_frames` 写 `.shotdesc/_frames.json`（源片指纹）；`session_desc` 发现
+  帧目录属于另一版源片时直接退出，不再用旧图描述新片。
+
+**改口径**
+
+- 段内取帧改为镜头感知（`seg_marks`）：段内镜头 ≤ N 时一镜一帧；镜头更多时按时间切 N 桶、
+  每桶取「信息量高且靠近桶中心」的镜头中点。12 张图从 12 个时间点变成 12 个画面，
+  图数与 token 不变。
+
+**新增（只告警，不阻断）**
+
+- `aicutplan/shared/number_claims.py` + `contracts.num_values()`：旁白里的数字必须能在
+  该句覆盖窗口的台词（日文原文 + 中文译文）里找到依据，否则 `python -m aicutplan check`
+  与 `cf_pipeline` 打印 `[数值断言]` 告警。EP01 实测点名 7 句，其中含「一万三千点」。
+- `aicutplan/shared/number_frames.py`：`check --number-frames` 把命中句抽成 **1280 宽** 帧
+  写到 `<工程>/.numframes/`，供读图核对画面浮字（段级/质检帧只有 320px，读不清数字）。
+  长句会被抽「句首窗中点 + 句子中点 + 末窗回退 0.4s」三帧（EP01 的 7 句 → 21 张），
+  因为数值浮字常出现在动作高潮处而非句首。带指纹缓存与时间基准切换（成片/源片）。
+- `aicutplan/shared/ocr_numbers.py`：`check --ocr` 用 `rapidocr-onnxruntime`（可选依赖）
+  识别上面这些帧，回答「画面当时写了什么」，写 `json/ocr_numbers.json`；四态
+  `screen-match / screen-other / noisy / no-text`。
+  **判定原则：台词 > 画面** —— 画面浮字是过程数据（强化增量 `+2750`、剩余点数 `3033`、
+  临时倍率），口径常与旁白不同，所以画面数字只作参考，不下「旁白错了」的结论；
+  美术字拆字（`13U5`）只算「疑似」。EP01 实测：句25 旁白「三千」而画面 `+2750`，
+  属于增量口径差异，不是错误 —— 这条正是把初版 `conflict` 判定改掉的原因。
+- `number_frames.extract_dense()` + `check --ocr-dense`：对「稀疏三帧一个数字都没读到」
+  的句子按 **1 帧/秒** 补抽（单句上限 12 张，独立清单 `_dense.json`，不动稀疏缓存），
+  再 OCR 一遍。EP01 实测补 29 张（21 → 50），结论是那 5 句在句窗内确实没有数字浮字
+  （句24 只读到物品卡「銅の剣（安物）」），说明这些数字来自台词或别的镜头，
+  进一步验证「台词为准、画面只作参考」。
+- `aicutplan/__init__.py`：非交互（管道/重定向）时把 stdout/stderr 固定为 UTF-8。
+  修的是「子进程退出码 0，但 `capture_output=True` 拿到 None」——中文 Windows 默认 GBK
+  让调用方解码失败；`test_batch` / `test_narration_contract` 的 4 个用例此前在 HEAD 上就红。
+
+测试：新增 `tests/test_frames_cache.py`（6）、`tests/test_number_claims.py`（9）、
+`tests/test_number_frames.py`（14）、`tests/test_ocr_numbers.py`（14）；
+全量 `python -m unittest discover -s tests` 289 项通过（1 skip）。
+
 ## v0.10.1 · 2026-11-13 — 原声段字幕全中文（用户要求去掉日文）
 
 - `r7_mux.py`：原声段字幕来源改为 `json/zh-segments-rapid.json`
