@@ -43,7 +43,29 @@
 """
 from __future__ import annotations
 
-__version__ = "0.10.0"
+import sys
+
+__version__ = "0.10.2"
+
+
+def _force_utf8_stdio() -> None:
+    """管道/重定向时把 stdout/stderr 固定为 UTF-8。
+
+    Windows 中文控制台的默认代码页是 GBK：一旦输出被重定向（``subprocess.run(...,
+    capture_output=True, text=True)``、IDE 输出面板、CI 日志），调用方按 UTF-8 解码
+    就会抛 ``UnicodeDecodeError`` —— 表现是「子进程退出码 0 但 stdout 是 None」。
+    交互式终端（isatty）保持原编码，避免影响正常打印。
+    """
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if stream is not None and not stream.isatty():
+                stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_force_utf8_stdio()
+
 __all__ = [
     "__version__",
     "paths", "io", "media", "cache", "contracts",
