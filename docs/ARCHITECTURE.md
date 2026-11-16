@@ -336,7 +336,9 @@ pytest
 4. skill 配方里的 `r7_mux.py` 质检阈值仍是旧值（1350–1900 字 / 130–190 句 / LRA≤5），
    拿它跑 v3 结构会误判 12 项失败；`ep01` / `ep05` / `recap-02` 的 `r6_mix.py`
    仍带已修复的采样率 bug。
-5. `main` 分支停在检索腿版 `4871650`，`cut-first` 是主线，尚未合回。
+5. **分支**：`cut-first` 是主线；v0.10.2（`3717689`）已 fast-forward 合入 `main`，两分支同点。
+   后续开发在 `cut-first`，发布时 `git merge --ff-only cut-first` 再推 `main`，
+   不再回退到检索腿版 `4871650`。
 6. 说话人分离、原声能量/语速特征尚未实现；数字事实已做三层：
    ①`number_claims.py` 台词断言（只提醒）；
    ②`check --number-frames` 抽 1280 宽帧到 `.numframes/` 供读图；

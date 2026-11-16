@@ -486,5 +486,6 @@ $PY -m py_compile *.py aicutplan/*.py     # 全量语法
   P0-2 的证据回喂不会进模型，需 `--force`。见 [架构说明 §9](docs/ARCHITECTURE.md)。
 - 剪映草稿是单向的：剪映保存后草稿加密，脚本读不回来。
 - 预览渲染是独立转码，画质上限等于片源；最终成片由 `r7_mux.py` 以 `-c:v copy` 输出。
-- `main` 分支停在检索腿版（旧链），`cut-first` 是当前主线，尚未合回。
+- `cut-first` 是当前主线；v0.10.2 已 fast-forward 合入 `main`（两分支同点）。
+  后续开发仍在 `cut-first`，发布时再 `git merge --ff-only cut-first` 推 `main`。
 - 图像字幕（蓝光 PGS）暂不支持，自动回退 ASR。
