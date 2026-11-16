@@ -336,8 +336,16 @@ def _delegate(name: str, args: list[str]) -> int:
     return subprocess.run(cmd, cwd=str(repo_root())).returncode
 
 
-def _check(project: str | Path, *, lint_only: bool = False) -> int:
-    """工程体检：lint + 时间轴 + TTS 一致性 + 台词源指纹。"""
+def _check(project: str | Path, *, lint_only: bool = False,
+           number_frames: bool = False, ocr: bool = False,
+           ocr_dense: bool = False) -> int:
+    """工程体检：lint + 时间轴 + TTS 一致性 + 台词源指纹。
+
+    ``--number-frames`` 抽 1280 宽帧供读图核对数字；``--ocr`` 再识别画面浮字，
+    ``--ocr-dense`` 对「三帧没读到数字」的句子按 1 帧/秒补抽后再识别。
+    这些都只作参考：**剧情事实以台词为准**，画面数字多为过程数据（增量/剩余/倍率），
+    不据此判旁白对错。
+    """
     from .contracts import (check_alignment, check_tts_consistency,
                             format_issues, lint_narration, summarize_quality,
                             validate_windows)
@@ -376,6 +384,30 @@ def _check(project: str | Path, *, lint_only: bool = False) -> int:
             print(f"  {r['name']:<24} {tag:<10} {r['bytes']:>6}B  {r['note']}")
         q = summarize_quality(p.root)
         print("指标: " + "  ".join(f"{k}={v}" for k, v in q.items()))
+        # 数值断言（只告警）：旁白里的数字至少要能在它覆盖的窗口台词里找到
+        try:
+            from .shared.number_claims import check as check_numbers, format_warnings
+            warn = format_warnings(check_numbers(p.root))
+            if warn:
+                print(warn)
+        except Exception as exc:
+            print(f"[数值断言] 跳过：{type(exc).__name__} {exc}")
+        # 高清帧：把命中句的画面浮字抽成 1280 宽，供模型/人核对数字
+        if number_frames or ocr:
+            try:
+                from .shared.number_frames import extract as extract_number_frames, format_rows
+                rows = extract_number_frames(p.root)
+                print(format_rows(rows) or "[数值帧] 没有命中数值断言的句子（或缺成片/源片）")
+            except Exception as exc:
+                print(f"[数值帧] 跳过：{type(exc).__name__} {exc}")
+        # 画面数字 OCR：只回答「画面当时写了什么」，不下「旁白错了」的结论
+        if ocr:
+            try:
+                from .shared.ocr_numbers import verify as verify_ocr, format_report
+                print(format_report(verify_ocr(p.root, dense=ocr_dense))
+                      or "[OCR 参考] 没有命中数值断言的句子")
+            except Exception as exc:
+                print(f"[OCR] 跳过：{type(exc).__name__} {exc}")
     return 0 if not issues else 1
 
 
@@ -423,7 +455,10 @@ def main(argv: list[str] | None = None) -> int:
         if not project:
             print("[aicutplan] check/lint 需要 --project <project.json>", file=sys.stderr)
             return 2
-        return _check(project, lint_only=(a.command == "lint"))
+        return _check(project, lint_only=(a.command == "lint"),
+                      number_frames="--number-frames" in a.rest,
+                      ocr="--ocr" in a.rest,
+                      ocr_dense="--ocr-dense" in a.rest)
     return _delegate(a.command, a.rest)
 
 

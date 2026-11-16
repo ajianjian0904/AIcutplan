@@ -194,6 +194,14 @@ def main() -> int:
         if not a.no_lint_block:
             print("[lint] 未通过，阻断（--no-lint-block 跳过）")
             return 3
+    # 数值断言（只告警，不阻断）：旁白数字缺台词依据 —— 「十三万点 / 一万三千点」类事故
+    try:
+        from aicutplan.shared.number_claims import check as check_numbers, format_warnings
+        msg = format_warnings(check_numbers(proj_dir))
+        if msg:
+            print(msg, flush=True)
+    except Exception as e:
+        print(f"[数值断言] 跳过：{type(e).__name__} {str(e)[:80]}", flush=True)
     # 5) TTS + 弹性对齐
     if not a.skip_tts:
         if not run([PY, str(proj_dir / "r5_tts.py"), "--project", str(pj)], cwd=proj_dir):

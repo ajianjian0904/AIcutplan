@@ -34,6 +34,7 @@
 """
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Iterable
 
@@ -456,3 +457,60 @@ def check_sentences_contract(sents: list[dict], wins: list[dict], cfg: dict | No
                 break
             prev = a
     return errors, warnings, stats
+
+
+# =============================================================================
+# 数值断言辅助（L0 纯函数，无 IO）
+# -----------------------------------------------------------------------------
+# 事故：「十三万点」被写成「一万三千点」。数字同时出现在台词和画面浮字里，
+# 但没人核对；320px 抽帧也读不清画面数字，所以只能先认台词。
+# 这里只负责「从文本里抽数值并归一」，项目级核对在
+# aicutplan/shared/number_claims.py（L1，能读工程产物）。
+# =============================================================================
+
+_CN_DIGIT = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
+             "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
+_CN_UNIT = {"十": 10, "百": 100, "千": 1000}
+_CN_BIG = {"万": 10000, "亿": 100000000}
+_CN_CHARS = "零一二两三四五六七八九十百千万亿"
+_NUM_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?|[" + _CN_CHARS + r"]+")
+
+
+def _cn_to_num(text: str) -> float:
+    """中文数字 → 数值：十三万 = 130000，一万三千 = 13000，三千三百 = 3300。"""
+    total = section = number = 0
+    for ch in text:
+        if ch in _CN_DIGIT:
+            number = _CN_DIGIT[ch]
+        elif ch in _CN_UNIT:
+            section += (number or 1) * _CN_UNIT[ch]
+            number = 0
+        elif ch in _CN_BIG:
+            section = (section + number) * _CN_BIG[ch]
+            total += section
+            section = number = 0
+    return float(total + section + number)
+
+
+def num_values(text: str) -> set[float]:
+    """抽取文本里「有量级意义」的数值，用于旁白与台词的交叉核对。
+
+    - 阿拉伯数字全部收（``1000`` / ``1,000`` / ``3.5`` 都归一成 float）
+    - 中文数字只在带 十/百/千/万/亿 或数值 ≥10 时收，
+      避免把「一个」「两下」「三种」当成数字断言
+    """
+    out: set[float] = set()
+    for m in _NUM_RE.finditer(str(text or "")):
+        s = m.group(0)
+        if s[0].isdigit():
+            try:
+                out.add(float(s.replace(",", "")))
+            except ValueError:
+                continue
+            continue
+        if len(s) == 1 and s in _CN_DIGIT:
+            continue
+        v = _cn_to_num(s)
+        if v >= 10:
+            out.add(v)
+    return out

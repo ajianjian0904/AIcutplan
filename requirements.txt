@@ -16,6 +16,9 @@
 # --- 视觉：会话内质检宫格图（qc_visual.py）---
 # Pillow>=9.0
 
+# --- 可选：画面数字 OCR 核对（check --ocr；不装也能用 --number-frames 读图核对）---
+# rapidocr-onnxruntime>=1.4
+
 # --- ASR：仅当源片没有内嵌文本字幕时才需要 ---
 # faster-whisper>=1.0
 # numpy>=1.24
