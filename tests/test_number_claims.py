@@ -35,6 +35,14 @@ class NumValuesTests(unittest.TestCase):
         self.assertEqual(num_values("两只手"), set())
         self.assertEqual(num_values("三种强化"), set())
 
+    def test_adverbs_with_digit_chars_are_not_claims(self):
+        # EP01 句34 的真实误报：「你可千万别被吓到」曾被解析成 10000000
+        self.assertEqual(num_values("你可千万别被吓到"), set())
+        self.assertEqual(num_values("万一失败呢"), set())
+        # 但真正的数量仍然要收
+        self.assertEqual(num_values("三千万点"), {30000000.0})
+        self.assertEqual(num_values("一千金币"), {1000.0})
+
     def test_mixed_text(self):
         self.assertEqual(num_values("三十三秒里打出 12000 点"), {33.0, 12000.0})
 

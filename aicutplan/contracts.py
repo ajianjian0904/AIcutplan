@@ -356,6 +356,24 @@ def check_hook_contract(wins: list[dict], cfg: dict,
     return errors, warnings
 
 
+def _windows_jump(wins: list[dict], ws: int, we: int) -> bool:
+    """绑定窗口内部是否存在源片时间跳转（相邻窗口 ``src_start`` 回退 >0.05s）。
+
+    剪辑会把后段镜头提前用（钩子、反转插叙），此时一句跨两段源片，
+    它的 ``src`` 首端 > 末端是合法的，不能按「区间倒置」判错。
+    """
+    prev = None
+    for i in range(ws, we + 1):
+        try:
+            cur = float(wins[i]["src_start"])
+        except (KeyError, IndexError, TypeError, ValueError):
+            return False
+        if prev is not None and cur < prev - 0.05:
+            return True
+        prev = cur
+    return False
+
+
 def check_sentences_contract(sents: list[dict], wins: list[dict], cfg: dict | None = None,
                              *, legacy: bool = False) -> tuple[list[str], list[str], dict]:
     """**落盘前**校验会话内导演稿。返回 ``(errors, warnings, stats)``。
@@ -407,6 +425,22 @@ def check_sentences_contract(sents: list[dict], wins: list[dict], cfg: dict | No
                 errors.append(f"句{k} src 不是合法的 [a,b] 数值对")
                 continue
             if z <= a:
+                # 跨源片跳转的句子：ws..we 内部源时间本身就回退（剪辑把后段镜头提前用），
+                # 首→末端点必然倒置。这不是「均匀分配」的症状（那种情况端点对不上窗口），
+                # 所以降级为信息项，仍按首末窗口端点校验。
+                if _windows_jump(wins, ws, we):
+                    if abs(a - float(wins[ws]["src_start"])) > SRC_TOL_A or \
+                            abs(z - float(wins[we]["src_end"])) > SRC_TOL_B:
+                        mismatches += 1
+                        if mismatches <= 6:
+                            errors.append(f"句{k} 跨源片跳转，声明端点 "
+                                          f"[{a:.1f},{z:.1f}] 与窗口 "
+                                          f"[{wins[ws]['src_start']:.1f},{wins[we]['src_end']:.1f}] 不符")
+                    else:
+                        stats["src_checked"] += 1
+                        warnings.append(f"句{k} 跨源片跳转（窗口 {ws}-{we}）：src 区间"
+                                        f"[{a:.1f},{z:.1f}] 不连续，属合法剪辑，按端点校验通过")
+                    continue
                 errors.append(f"句{k} src 区间倒置 [{a:.1f},{z:.1f}]")
                 continue
             wa, wz = float(wins[ws]["src_start"]), float(wins[we]["src_end"])
@@ -473,6 +507,8 @@ _CN_DIGIT = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4,
 _CN_UNIT = {"十": 10, "百": 100, "千": 1000}
 _CN_BIG = {"万": 10000, "亿": 100000000}
 _CN_CHARS = "零一二两三四五六七八九十百千万亿"
+#: 副詞/成语里的「数字」不是数量：千万（务必）、万一（如果）、万分（非常）
+_CN_STOP = {"千万", "万一", "万分", "万万", "千万"}
 _NUM_RE = re.compile(r"\d+(?:,\d{3})*(?:\.\d+)?|[" + _CN_CHARS + r"]+")
 
 
@@ -509,6 +545,8 @@ def num_values(text: str) -> set[float]:
                 continue
             continue
         if len(s) == 1 and s in _CN_DIGIT:
+            continue
+        if s in _CN_STOP:          # 「你可千万别被吓到」不是数字
             continue
         v = _cn_to_num(s)
         if v >= 10:
