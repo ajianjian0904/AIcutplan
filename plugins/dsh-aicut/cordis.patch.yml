@@ -1,0 +1,17 @@
+# dsh-aicut 组合包补丁：把 AIcutplan 工具插件行插入 profile。
+#
+# 本行的 config 会完整覆盖默认值（Loader 语义：匹配的覆盖替换整个 config），
+# 所以要改哪一项就把整段抄过来改。字段含义见 docs/DETAIL.md。
+#
+# 注意：路径一律用绝对路径；仓库根是 aicutplan 包所在目录（不是工程目录）。
+- insert:
+    - id: aicut
+      name: '@local/dsh-aicut'
+      config:
+        repoRoot: 'E:\workbuddy\漫剪软件开发'
+        python: 'D:\Python312\python.exe'
+        ttsPython: 'C:\Users\10451\.workbuddy\binaries\python\envs\default\Scripts\python.exe'
+        libraryRoot: 'E:\workbuddy\漫剪作品库'
+        timeoutMs: 900000
+        graceMs: 3000
+        maxOutputBytes: 1048576

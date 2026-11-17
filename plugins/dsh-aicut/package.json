@@ -1,0 +1,31 @@
+{
+  "name": "@local/dsh-aicut",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DSH 插件：把 AIcutplan 漫剪解说流水线接成宿主工具（体检 / 规划 / 旁白 / 质检 / 渲染 / 归档）。",
+  "type": "module",
+  "exports": {
+    ".": "./index.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "lib",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "docs",
+    "skill",
+    "icon.svg"
+  ],
+  "icon": "./icon.svg",
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "license": "MIT"
+}

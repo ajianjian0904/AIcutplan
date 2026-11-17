@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "漫剪流水线",
+    "description": "把 AIcutplan 的画面先定、旁白、逐句质检、渲染与归档接成一组宿主工具；写稿与读图判断仍留在会话里。",
+    "detail": "docs/DETAIL.md"
+  }
+}

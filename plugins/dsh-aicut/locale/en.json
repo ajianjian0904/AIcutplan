@@ -1,0 +1,7 @@
+{
+  "meta": {
+    "title": "Anime cut pipeline",
+    "description": "Exposes the AIcutplan recap pipeline as host tools: cut-first planning, narration, per-sentence QC, render, and archiving. Writing and frame judgement stay in the session.",
+    "detail": "docs/DETAIL.md"
+  }
+}

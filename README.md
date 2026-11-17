@@ -60,10 +60,14 @@ aicutplan/                    Python 包（全部代码按层入包，根目录�
   session/                    L1 会话内工具：shot_desc session_desc scene_desc scene_from_shots
   legacy/                     L1 旧检索腿：prepare_media shots_scan align_chain
                               relayout_smart make_srt（web 台旧链运行按钮仍调用）
+                              upgrade_sents（历史稿补 src）
   webui/                      L3 web 校对台：server pipeline sentence_studio review
                               preview_render jianying_export jianying_worker
+plugins/dsh-aicut/           DeepSeek Harness 插件（15 个 aicut_* 工具 + aicut-workflow skill）
+                              只调本仓库 CLI，不含业务逻辑；装法见 plugins/dsh-aicut/docs/DETAIL.md
 config/           仓库级配置（templates.json / tts_calibration.json / llm_config.example.json）
-docs/             架构说明（分层图 / 数据契约 / 缓存事故清单）
+docs/             架构说明（ARCHITECTURE.md）
+docs/notes/       设计与审计笔记（可行性 / 插件分工 / 剧情实现 / 抽帧补丁 / 画面审计 / WorkBuddy 派发）
 tests/            标准库 unittest 测试（零 ffmpeg / 零网络 / 零模型）
 web/              8 个页面的静态文件（无构建）
 pyproject.toml requirements.txt .gitignore CHANGELOG.md
