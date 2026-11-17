@@ -11,6 +11,7 @@
  */
 import { resolveConfig } from './lib/config.js'
 import { createRunner } from './lib/run.js'
+import { syncSkill } from './lib/skill.js'
 import { buildTools } from './lib/tools.js'
 
 export const name = 'aicut'
@@ -30,6 +31,9 @@ export const inject = ['tools', 'subprocess']
  */
 export function apply(ctx, config) {
   const cfg = resolveConfig(config)
+  // 技能随插件自动注册：把 skill/SKILL.md 同步到用户技能根（幂等，失败不影响工具激活）
+  const skill = syncSkill(cfg.dshHome)
+  if (skill.written) console.log('[aicut] skill 已同步 → ' + skill.target)
   const runner = createRunner(ctx, cfg)
   const disposers = buildTools(cfg, runner).map((definition) => ctx.tools.register(definition))
   const off = typeof ctx.on === 'function'
