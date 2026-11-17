@@ -43,6 +43,32 @@ def _stamp(proj_dir, stage: str) -> None:
         print(f"[渲染门禁] 基线写入失败（{stage}）：{type(e).__name__} {e}", flush=True)
 
 
+def _approval(proj_dir, stage: str, allow: bool) -> bool:
+    """人工审批闸门：该阶段必须有人签核过，且产物在签核后没变。
+
+    审批基础设施本身出错时不阻断生产（只告警）——宁可放过，不可让主链停摆。
+    """
+    try:
+        from aicutplan import approvals as AP
+        if not AP.enforced(proj_dir):
+            print(f"[审批] {stage}：项目关闭了审批（approvals.enforce=false），跳过", flush=True)
+            return True
+        problem = AP.require(proj_dir, stage)
+        if problem is None:
+            print(f"[审批] {stage} 已批准且产物未变", flush=True)
+            return True
+        if allow:
+            print(f"[审批] {stage} 未批准，--allow-unapproved：继续（本次未走人工闸门）", flush=True)
+            return True
+        print(f"[审批] {stage} 阻断：{problem}", flush=True)
+        print(f"[审批] 走完流程：aicutplan approve {stage} --project <pj> → 拿口令 → "
+              f"回填 --code 落记录；确需跳过加 --allow-unapproved", flush=True)
+        return False
+    except Exception as e:
+        print(f"[审批] 检查失败（不阻断）：{type(e).__name__} {str(e)[:80]}", flush=True)
+        return True
+
+
 def _gate(proj_dir, stage: str, allow_stale: bool) -> bool:
     """渲染前强制校验：上游产物是否由当前输入生成。"""
     try:
@@ -116,6 +142,8 @@ def main() -> int:
     ap.add_argument("--label", default="", help="本次归档标签，如 v36（默认按时间）")
     ap.add_argument("--allow-stale", action="store_true",
                     help="渲染前门禁不通过也继续（成片会混入旧素材，不推荐）")
+    ap.add_argument("--allow-unapproved", action="store_true",
+                    help="阶段未审批也继续（跳过人工闸门，记录为绕过）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -176,6 +204,9 @@ def main() -> int:
         # 1) 画面先定
         if not run([PY, str(ROOT / "aicutplan" / "chain" / "cutfirst_plan.py"), "--project", str(pj)]):
             return 2
+        # 人工闸门：cutplan 必须被批准过（画面结构一旦定型，返工最贵）
+        if not _approval(proj_dir, "cutplan", a.allow_unapproved):
+            return 7
         # 2) 无声粗剪（工程脚本）
         if not run([PY, str(proj_dir / "cut.py"), "--project", str(pj), "--force"], cwd=proj_dir):
             return 2
@@ -202,8 +233,10 @@ def main() -> int:
             print(msg, flush=True)
     except Exception as e:
         print(f"[数值断言] 跳过：{type(e).__name__} {str(e)[:80]}", flush=True)
-    # 5) TTS + 弹性对齐
+    # 5) TTS + 弹性对齐（人工闸门：句子稿必须被批准过）
     if not a.skip_tts:
+        if not _approval(proj_dir, "narration", a.allow_unapproved):
+            return 7
         if not run([PY, str(proj_dir / "r5_tts.py"), "--project", str(pj)], cwd=proj_dir):
             return 2
         if not run([PY, str(ROOT / "aicutplan" / "chain" / "elastic_fit.py"), "--project", str(pj)]):
@@ -237,7 +270,12 @@ def main() -> int:
         print("[runs] --no-snapshot：未归档（latest 仍指向旧版本）", flush=True)
     else:
         try:
+            from aicutplan import approvals as AP
             from aicutplan import workspace as WS
+            problem = AP.require(proj_dir, "publish") if AP.enforced(proj_dir) else None
+            if problem and not a.allow_unapproved:
+                print(f"[审批] publish 阻断（成片已生成，未归档）：{problem}", flush=True)
+                return 7
             label = a.label or datetime.now().strftime("auto-%m%d-%H%M")
             m = WS.snapshot(proj_dir, label=label, sentences=a.sentences)
             print(f"[runs] 已归档 {m['run_id']}（{len(m['artifacts'])} 个产物）→ "

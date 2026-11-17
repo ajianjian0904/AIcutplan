@@ -417,6 +417,86 @@ export function buildTools(cfg, runner) {
       timeoutMs: TIMEOUTS.check,
     },
 
+    {
+      name: 'aicut_approve',
+      description: '三阶段审批（cutplan / narration / publish）。不带 stage 或 json=true 看状态；不带 code 时发一个 6 位口令（绑定当前产物签名）；把用户回填的口令用 code 传回来才落批准记录。产物在批准后被改动会自动失效。',
+      parameters: {
+        type: 'object',
+        properties: {
+          project: { type: 'string', description: '工程路径（project.json 或目录），绝对路径。' },
+          stage: { type: 'string', enum: ['cutplan', 'narration', 'publish'], description: '要审批的阶段；省略则只列状态。' },
+          code: { type: 'string', description: '用户回给会话的 6 位口令；带它才真正写批准记录。' },
+          note: { type: 'string', description: '批准备注（如「钩子 809.7-820.5，块表 14 块」）。' },
+          seed: { type: 'number', description: 'narration 抽样种子（与 aicut_review 的 seed 一致，便于复现）。' },
+          json: { type: 'boolean', description: '状态输出为 JSON。' },
+        },
+        required: ['project'],
+        additionalProperties: false,
+      },
+      output: TEXT_OUTPUT,
+      async execute(rawArgs, exec) {
+        const args = ['approve']
+        if (typeof rawArgs.stage === 'string') args.push(rawArgs.stage)
+        args.push('--project', projectFile(rawArgs.project))
+        if (typeof rawArgs.code === 'string' && rawArgs.code.trim() !== '') args.push('--code', rawArgs.code.trim())
+        if (typeof rawArgs.note === 'string' && rawArgs.note.trim() !== '') args.push('--note', rawArgs.note)
+        if (typeof rawArgs.seed === 'number') args.push('--seed', String(rawArgs.seed))
+        if (rawArgs.json === true) args.push('--json')
+        const argv = [cfg.python, '-X', 'utf8', '-m', 'aicutplan', ...args]
+        const result = await runner.run(argv, {
+          cwd: cfg.repoRoot, timeoutMs: TIMEOUTS.check, signal: exec?.signal,
+        })
+        const text = [result.stdout, result.stderr].filter((x) => x && x.trim() !== '').join('\n')
+        return {
+          exitCode: result.exitCode,
+          text: (tailLines(text, 40) || '（无输出）') +
+            (result.exitCode === 0 ? '' : '\n' + (exitHint(result) ?? '看上面日志定位。')),
+        }
+      },
+      timeoutMs: TIMEOUTS.check,
+    },
+
+    {
+      name: 'aicut_review',
+      description: '跨集阶段汇总审核：把多集同一阶段（cutplan/narration/publish）的产物收成「指标 + 必看句 + 可复现抽样」Markdown，供人工审批。默认输出到 <作品库>/_review/<stage>/<时间>/index.md。',
+      parameters: {
+        type: 'object',
+        properties: {
+          stage: { type: 'string', enum: ['cutplan', 'narration', 'publish'], description: '汇总哪个阶段。' },
+          projects: {
+            type: 'array',
+            items: { type: 'string' },
+            description: '工程路径列表（project.json 或目录），绝对路径。',
+          },
+          out: { type: 'string', description: '输出目录（可选）。' },
+          sample: { type: 'number', description: '抽样比例（narration 用，默认 0.1）。' },
+          seed: { type: 'number', description: '抽样种子（默认当天日期，结果可复现）。' },
+        },
+        required: ['stage', 'projects'],
+        additionalProperties: false,
+      },
+      output: TEXT_OUTPUT,
+      async execute(rawArgs, exec) {
+        const stage = String(rawArgs.stage)
+        const list = Array.isArray(rawArgs.projects) ? rawArgs.projects : [rawArgs.projects]
+        const args = ['review', stage, '--projects', list.map((p) => String(p)).join(',')]
+        if (typeof rawArgs.out === 'string' && rawArgs.out.trim() !== '') args.push('--out', rawArgs.out)
+        if (typeof rawArgs.sample === 'number') args.push('--sample', String(rawArgs.sample))
+        if (typeof rawArgs.seed === 'number') args.push('--seed', String(rawArgs.seed))
+        const argv = [cfg.python, '-X', 'utf8', '-m', 'aicutplan', ...args]
+        const result = await runner.run(argv, {
+          cwd: cfg.repoRoot, timeoutMs: TIMEOUTS.check, signal: exec?.signal,
+        })
+        const text = [result.stdout, result.stderr].filter((x) => x && x.trim() !== '').join('\n')
+        return {
+          exitCode: result.exitCode,
+          text: (tailLines(text, 40) || '（无输出）') +
+            (result.exitCode === 0 ? '' : '\n' + (exitHint(result) ?? '看上面日志定位。')),
+        }
+      },
+      timeoutMs: TIMEOUTS.check,
+    },
+
     // ---------- 渲染 / 批量 ----------
     {
       name: 'aicut_render',

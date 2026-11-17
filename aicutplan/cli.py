@@ -40,7 +40,8 @@ SCRIPTS = {
 }
 
 # 这些子命令由本包直接实现，不启子进程
-DIRECT = ("check", "lint", "version", "lib", "runs", "clean", "guard", "batch")
+DIRECT = ("check", "lint", "version", "lib", "runs", "clean", "guard", "batch",
+          "approve", "approvals", "review")
 
 
 def _library(argv: list[str]) -> int:
@@ -135,9 +136,17 @@ def _runs(argv: list[str]) -> int:
     p.add_argument("--note", default="")
     p.add_argument("--require-qc", action="store_true",
                    help="要求已跑完会话内逐格质检（qc --merge），否则拒绝归档")
+    p.add_argument("--require-approval", action="store_true",
+                   help="要求 publish 阶段已人工批准且成片未变，否则拒绝归档")
     a = ap.parse_args(argv)
 
     if a.sub == "snapshot":
+        if getattr(a, "require_approval", False):
+            from . import approvals as AP
+            problem = AP.require(a.project, "publish")
+            if problem:
+                print(f"[runs] 归档被拒绝（未通过人工审批）：{problem}", file=sys.stderr)
+                return 7
         try:
             m = WS.snapshot(a.project, label=a.label, sentences=a.sentences,
                             note=a.note, require_qc=a.require_qc)
@@ -202,6 +211,7 @@ def _runs(argv: list[str]) -> int:
     if a.json:
         print(json.dumps(rows, ensure_ascii=False, indent=1))
         return 0
+
     if not rows:
         print("（尚无归档；先 runs snapshot --project <pj> --label v1）")
         return 0
@@ -218,6 +228,98 @@ def _mb(n: int) -> str:
     if n >= 1 << 30:
         return f"{n / (1 << 30):.2f}GB"
     return f"{n / (1 << 20):.1f}MB"
+
+
+def _approve(argv: list[str], *, status_only: bool = False) -> int:
+    """阶段审批：看状态 / 发口令 / 凭口令落记录。"""
+    from . import approvals as AP
+
+    ap = argparse.ArgumentParser(prog="aicutplan approve",
+                                 description="三阶段审批（cutplan / narration / publish）")
+    ap.add_argument("stage", nargs="?", choices=AP.STAGES)
+    ap.add_argument("--project", required=True)
+    ap.add_argument("--code", default=None, help="把 approve 发出的 6 位口令回填，才真正落记录")
+    ap.add_argument("--note", default="")
+    ap.add_argument("--seed", type=int, default=None, help="narration 抽样种子（与 review 一致）")
+    ap.add_argument("--by", default="user")
+    ap.add_argument("--force", action="store_true",
+                    help="跳过口令直接记账（仅自动化用；人工审批不要用）")
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+
+    if status_only or not a.stage:
+        st = AP.status(a.project)
+        if a.json:
+            print(json.dumps(st, ensure_ascii=False, indent=1))
+            return 0
+        print(f"[approvals] {a.project}")
+        for stage in AP.STAGES:
+            s = st[stage]
+            if not s["sig"]:
+                mark, note = "·", "无产物"
+            elif s["valid"]:
+                mark, note = "✅", f"{s['at']} by {s['by']} {('｜' + s['note']) if s['note'] else ''}"
+            elif s["approved"]:
+                mark, note = "⚠", f"已失效（产物在 {s['at']} 之后变过）"
+            else:
+                mark, note = "✗", "未审批"
+            print(f"  {mark} {stage:<10} {note}")
+        return 0
+
+    if a.code and a.force:
+        print("--code 与 --force 不要同时用", file=sys.stderr)
+        return 2
+    try:
+        if a.force:
+            sig = AP.stage_sig(a.project, a.stage)
+            if sig is None:
+                print(f"{a.stage} 还没有产物", file=sys.stderr)
+                return 2
+        elif a.code:
+            sig = AP.confirm(a.project, a.stage, a.code)
+        else:
+            code, expires = AP.issue_code(a.project, a.stage)
+            print(f"[approve] {a.stage} 待确认，口令：{code}")
+            print(f"  10 分钟内有效，绑定当前产物签名。把口令回给会话后再执行：")
+            print(f"  aicutplan approve {a.stage} --project <pj> --code {code}")
+            return 0
+        rec = AP.record(a.project, a.stage, sig=sig, by=a.by, note=a.note,
+                        sample_seed=a.seed, checked=[f"sig:{sig[:8]}"], channel="chat")
+    except RuntimeError as e:
+        print(f"[approve] 失败：{e}", file=sys.stderr)
+        return 2
+    print(f"[approve] {a.stage} 已批准（{rec['at']} by {rec['by']}）sig={sig[:8]}"
+          + (f"｜{a.note}" if a.note else ""))
+    return 0
+
+
+def _review(argv: list[str]) -> int:
+    """跨集阶段汇总：指标 + 必看 + 抽样 → Markdown。"""
+    from . import review as RV
+
+    ap = argparse.ArgumentParser(prog="aicutplan review", description="跨集阶段汇总审核")
+    ap.add_argument("stage", choices=RV.STAGES)
+    ap.add_argument("--projects", required=True, help="逗号分隔的工程路径（目录或 project.json）")
+    ap.add_argument("--out", default=None, help="输出目录（默认 <库>/_review/<stage>/<时间>）")
+    ap.add_argument("--sample", type=float, default=0.1, help="抽样比例（narration 用）")
+    ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--json", action="store_true")
+    a = ap.parse_args(argv)
+
+    projects = [x.strip() for x in a.projects.split(",") if x.strip()]
+    if not projects:
+        print("--projects 为空", file=sys.stderr)
+        return 2
+    try:
+        result = RV.write_review(projects, a.stage, out=a.out, ratio=a.sample, seed=a.seed)
+    except ValueError as e:
+        print(f"[review] {e}", file=sys.stderr)
+        return 2
+    if a.json:
+        print(json.dumps(result, ensure_ascii=False, indent=1))
+    else:
+        print(RV.format_console(result, a.stage))
+    return 0
 
 
 def _clean(argv: list[str]) -> int:
@@ -473,6 +575,10 @@ def main(argv: list[str] | None = None) -> int:
         return _guard(a.rest)
     if a.command == "batch":
         return _batch(a.rest)
+    if a.command in ("approve", "approvals"):
+        return _approve(a.rest, status_only=(a.command == "approvals"))
+    if a.command == "review":
+        return _review(a.rest)
     if a.command in ("check", "lint"):
         # 从透传参数里取 --project
         project = None

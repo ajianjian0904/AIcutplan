@@ -19,6 +19,8 @@
 | `aicut_narrate` | `narrate --export` / `--sentences` | 导出写作表 / 落盘句子稿（写盘前校验） |
 | `aicut_qc` | `qc --plan/--merge/--probe` | 逐句质检批次、合并判定、多帧复核 |
 | `aicut_qc_compare` | `-m aicutplan.chain.qc_compare` | 两套模型判定的交叉验证：一致率、分歧、probe 并集 |
+| `aicut_approve` | `approve / approvals` | 三阶段审批：发口令、凭口令落记录、看状态（产物一改即失效） |
+| `aicut_review` | `review` | 跨集阶段汇总：指标 + 必看句 + 可复现抽样 → Markdown |
 | `aicut_render` | `run` | cut-first 主链出片（可跳过阶段、预演、质检闭环） |
 | `aicut_batch` | `batch` | 按导演稿批量出片 / 断点续跑 |
 | `aicut_runs` | `runs snapshot/list/latest/verify` | 版本归档与指纹校验 |

@@ -80,6 +80,8 @@ def main() -> int:
     ap.add_argument("--label", default="", help="本次归档标签（默认 qc-时间）")
     ap.add_argument("--allow-stale", action="store_true",
                     help="渲染门禁不通过也继续（成片会混入旧素材，不推荐）")
+    ap.add_argument("--allow-unapproved", action="store_true",
+                    help="narration 未审批也继续（跳过人工闸门）")
     a = ap.parse_args()
     pj = Path(a.project).expanduser().resolve()
     proj_dir = pj.parent
@@ -119,6 +121,21 @@ def main() -> int:
         print(f"  句{i}: {old.get(i)} → {new.get(i)}")
 
     only = ",".join(str(i) for i in changed)
+
+    # 人工闸门：改稿也是改旁白，未经审批的稿子不许直接重合成（--allow-unapproved 可绕）
+    try:
+        from aicutplan import approvals as AP
+        if AP.enforced(proj_dir):
+            problem = AP.require(proj_dir, "narration")
+            if problem and not a.allow_unapproved:
+                print(f"[审批] narration 阻断：{problem}", flush=True)
+                print("[审批] 先 approve narration 再重跑；确需跳过加 --allow-unapproved", flush=True)
+                return 7
+            if problem is None:
+                print("[审批] narration 已批准且产物未变", flush=True)
+    except Exception as e:  # 审批设施出错不阻断生产
+        print(f"[审批] 检查失败（不阻断）：{type(e).__name__} {str(e)[:80]}", flush=True)
+
     steps = [
         ([a.python, str(ROOT / "aicutplan" / "chain" / "narrate_cut.py"), "--project", str(pj),
           "--sentences", str(sp)], None),

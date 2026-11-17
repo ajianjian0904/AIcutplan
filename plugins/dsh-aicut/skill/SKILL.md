@@ -126,7 +126,28 @@ DeepSeek 只做「派任务 → 收 JSON → 仲裁 → 落盘」，**不要自�
 `deepseek-v4.1-flash` 明显更准（6 镜里只有 1 镜与我旧描述互补而非冲突）。只信 `desc` 的动作与场景、
 `depth` 的情绪；人名与物件抽 1–2 镜核对；**不要整表覆盖 `shots_desc.json`**。
 
-## 8. 不要做的事
+## 8. 三阶段人工审批（默认开启）
+
+三个节点必须**由人签核**才放行，模型不能自批（要靠用户回填口令码）：
+
+| 阶段 | 卡在哪 | 批什么 |
+|---|---|---|
+| `cutplan` | 粗剪（`cut.py`）之前 | 钩子段、块表、异常窗（碎镜/源时间回跳） |
+| `narration` | TTS 与 `refit` 之前 | 抽样 10% + 必看句（钩子句、每块首句、超槽句、数字断言） |
+| `publish` | `runs snapshot` 之前 | `judged == total`、失配 0、12 项验收 |
+
+流程：
+
+1. `aicut_review stage=<stage> projects=[...]` → 生成 `_review/<stage>/<时间>/index.md`（指标 + 必看 + 抽样）；
+2. 读 index 与各集 sample，判断要不要改；
+3. `aicut_approve project=<pj> stage=<stage>` → 返回 6 位口令，**把口令给用户，等他回**；
+4. 用户回码后，`aicut_approve ... code=<码>` 才写批准记录（绑定当前产物签名）；
+5. 产物一改，批准**自动失效**（`approvals` 里显示 ⚠ 已失效），必须重新批。
+
+闸门不通过 = 退出码 **7**。确需跳过用 `--allow-unapproved`（会在日志里留痕）。
+单个工程可用 `project.json` 的 `approvals.enforce=false` 关掉审批。
+
+## 9. 不要做的事
 
 - 不要在 web 校对台（`/flow` 页）点「运行」按钮：旧 17 步链会覆盖已定型的 cut-first 数据。
   审稿只用逐句台的句级锚点 + 确认。

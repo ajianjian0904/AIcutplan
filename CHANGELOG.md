@@ -5,6 +5,25 @@
 
 ---
 
+## v0.11.0 · 2026-11-18 — 三阶段人工审批 + 跨集汇总审核
+
+**为什么**：原有闸门只证明「自洽」（契约 / lint / 指纹 / 验收），拦不住「还没人看过」。
+现在把「人看过并放行」变成可校验、可失效的记录。
+
+- `approvals.py`：三阶段签名（cutplan / narration / publish），只覆盖该阶段决策、排除后续合法改写
+  （cutplan 排除 `new_start/new_end`；narration 排除 mp3）；产物一改批准自动失效。
+- 口令确认：`approve <stage>` 发 6 位码（绑定 stage + 当前签名、10 分钟、一次性），
+  回填 `--code` 才落记录——模型拿不到用户回的那个码，**无法自批**。
+- `review.py` + `aicutplan review`：跨集汇总「指标 + 必看句（钩子/块首/超槽/数字）+ 可复现抽样」，
+  输出 Markdown（`_review/<stage>/<时间>/index.md`）。
+- 闸门：`cf_pipeline`（粗剪前 cutplan、TTS 前 narration、归档前 publish）、`refit`（narration）、
+  `runs snapshot --require-approval`（publish）；不通过退出码 **7**，`--allow-unapproved` 可绕；
+  单工程可用 `project.json` 的 `approvals.enforce=false` 关闭。
+- 插件新增 `aicut_approve`、`aicut_review`（15 → 17 个工具），skill 增「三阶段人工审批」一节。
+- 测试 +17（`test_approvals.py` 11、`test_review.py` 6），全量 326 项。
+
+---
+
 ## v0.10.3 · 2026-11-17 — 修「归档被原地改写」：r6/r7 原子写 + `runs verify --all`
 
 **事故**：`runs snapshot` 用硬链接归档 `final.mp4`，而 `r7_mux.py` 是 `ffmpeg -y` **原地截断**写
