@@ -15,7 +15,7 @@ import { resolve } from 'node:path'
  * }} AicutConfig */
 
 const DEFAULTS = {
-  repoRoot: 'E:/workbuddy/漫剪软件开发',
+  repoRoot: 'E:/deepseek_workspace/自动剪辑工作流/漫剪软件开发',
   python: 'D:/Python312/python.exe',
   ttsPython: 'C:/Users/10451/.workbuddy/binaries/python/envs/default/Scripts/python.exe',
   libraryRoot: 'E:/workbuddy/漫剪作品库',

@@ -1,6 +1,6 @@
 # 漫剪流水线（dsh-aicut）
 
-把 [AICutplan](file:///E:/workbuddy/漫剪软件开发) 的确定性 CLI 接成 DeepSeek Harness 的宿主工具。
+把 [AICutplan](file:///E:/deepseek_workspace/自动剪辑工作流/漫剪软件开发) 的确定性 CLI 接成 DeepSeek Harness 的宿主工具。
 插件本身**不做创作判断**：写稿、读宫格图判画、决定改哪句，都留在会话里由模型完成；
 插件负责路径校验、选对解释器、超时、日志截断与失败指引。
 
@@ -30,7 +30,7 @@
 
 | 字段 | 默认 | 说明 |
 |---|---|---|
-| `repoRoot` | `E:\workbuddy\漫剪软件开发` | aicutplan 包所在仓库根（不是工程目录） |
+| `repoRoot` | `E:\deepseek_workspace\自动剪辑工作流\漫剪软件开发` | aicutplan 包所在仓库根（不是工程目录） |
 | `python` | `D:\Python312\python.exe` | 规划 / 渲染 / 体检解释器 |
 | `ttsPython` | `~/.workbuddy/.../python.exe` | 装了 edge-tts / faster-whisper 的解释器 |
 | `libraryRoot` | `E:\workbuddy\漫剪作品库` | 作品库根，覆盖 `AICUTPLAN_LIBRARY` |
