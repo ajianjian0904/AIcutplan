@@ -5,6 +5,24 @@
 
 ---
 
+## v0.10.3 · 2026-11-17 — 修「归档被原地改写」：r6/r7 原子写 + `runs verify --all`
+
+**事故**：`runs snapshot` 用硬链接归档 `final.mp4`，而 `r7_mux.py` 是 `ffmpeg -y` **原地截断**写
+`out/03`（inode 不变）。于是每次重渲染会连带改写**所有历史归档**的成片；`runs verify` 只验最新
+一版，问题长期不可见。EP01–EP04 实测：4 集共 21 个归档里只有最后一版指纹完好，其余全部失效
+（相关坏档已清理，原因与保留清单写在各集 `runs/README-archive-incident.md`）。
+
+**修**：
+1. `r6_mix.py` / `r7_mux.py` 改为「临时文件 + `Path.replace`」原子写（4 集工程 + 配方副本
+   `~/.workbuddy/skills/anime-recap/scripts/`）——重渲染产生新 inode，历史归档不再被改写；
+2. `runs verify` 增加 `--all`（一次校验全部归档）与 `--run <id>`；
+3. `manifest.json` 增加 `final` 段（path/bytes/sig/mode），verify 与 latest 不必再翻 artifacts。
+
+**验证**：EP01 重跑 r6+r7 后 `out/03` inode 换新（`…059412`），`r007` 保留旧 inode（`…059413`）；
+两个归档 `verify --all` 全过。测试新增 6 项（`tests/test_runs_verify.py`），全量 309 项。
+
+---
+
 ## v0.10.2 · 2026-11-16 — 抽帧缓存加指纹 + 镜头感知取帧 + 数值断言
 
 **修 bug（旧片段复用）**

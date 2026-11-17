@@ -290,6 +290,13 @@ def snapshot(project: str | Path, *, label: str = "", sentences: str | Path | No
         "source_video": cfg.get("source_video"),
         "sentences": sent_info,
         "qc": qc,
+        # 成片单独一段：verify 与 latest 都能直接用，不必去 artifacts 里翻
+        "final": {
+            "path": "final.mp4",
+            "bytes": (artifacts.get("final.mp4") or {}).get("bytes"),
+            "sig": (artifacts.get("final.mp4") or {}).get("sig"),
+            "mode": (artifacts.get("final.mp4") or {}).get("mode"),
+        },
         "artifacts": artifacts,
     }
     dump_json(run_dir / "manifest.json", manifest)

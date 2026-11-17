@@ -121,10 +121,13 @@ def _runs(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(prog="aicutplan runs", description="生成版本（runs）管理")
     sub = ap.add_subparsers(dest="sub", required=True)
     for name, h in (("list", "列出版本"), ("latest", "打印最新归档指针"),
-                    ("verify", "校验最新归档完整性")):
+                    ("verify", "校验归档完整性（默认最新，--all 校验全部）")):
         p = sub.add_parser(name, help=h)
         p.add_argument("--project", required=True)
         p.add_argument("--json", action="store_true")
+        if name == "verify":
+            p.add_argument("--all", action="store_true", help="校验全部归档（发现历史被覆盖）")
+            p.add_argument("--run", default=None, help="只校验指定 run_id")
     p = sub.add_parser("snapshot", help="把当前成片归档为一次不可变 run")
     p.add_argument("--project", required=True)
     p.add_argument("--label", default="", help="版本标签，如 v36")
@@ -156,15 +159,43 @@ def _runs(argv: list[str]) -> int:
             print(f"  成片: {d.get('final')}  ({d.get('final_bytes', 0) / 1048576:.1f}MB)")
         return 0
     if a.sub == "verify":
-        d = WS.latest(a.project, verify=False)
-        run_dir = WS.project_dir(a.project) / WS.RUNS_DIR / d["run_id"]
+        runs_dir = WS.project_dir(a.project) / WS.RUNS_DIR
+        if a.all:
+            dirs = sorted([d for d in runs_dir.iterdir() if (d / "manifest.json").exists()]) \
+                if runs_dir.exists() else []
+            if not dirs:
+                print("（尚无归档）")
+                return 0
+            bad = 0
+            for d in dirs:
+                issues = WS.verify_run(d)
+                if issues:
+                    bad += 1
+                    print(f"[verify] {d.name} 有问题：")
+                    for x in issues:
+                        print("  ! " + x)
+                else:
+                    print(f"[verify] {d.name} 指纹一致")
+            print(f"[verify] {len(dirs)} 个归档，{len(dirs) - bad} 个完好，{bad} 个有问题")
+            return 1 if bad else 0
+
+        if a.run:
+            run_dir = runs_dir / a.run
+            if not run_dir.exists():
+                print(f"[verify] 找不到归档：{a.run}", file=sys.stderr)
+                return 2
+            run_id = a.run
+        else:
+            d = WS.latest(a.project, verify=False)
+            run_id = d["run_id"]
+            run_dir = runs_dir / run_id
         issues = WS.verify_run(run_dir)
         if issues:
-            print(f"[verify] {d['run_id']} 有问题：")
+            print(f"[verify] {run_id} 有问题：")
             for x in issues:
                 print("  ! " + x)
             return 1
-        print(f"[verify] {d['run_id']} 全部产物指纹一致")
+        print(f"[verify] {run_id} 全部产物指纹一致")
         return 0
 
     rows = WS.list_runs(a.project)
